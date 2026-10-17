@@ -1,0 +1,23 @@
+# 保证 Windows 批处理检出时是 CRLF，避免中文乱码 / 执行异常
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 文本统一 LF 存档
+*.py text eol=lf
+*.md text eol=lf
+*.js text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.json text eol=lf
+*.xml text eol=lf
+
+# 二进制不做任何转换
+*.pyd binary
+*.dll binary
+*.exe binary
+*.pdb binary
+*.chm binary
+*.zip binary
+*.whl binary
+*.pcap binary
+*.pcapng binary
