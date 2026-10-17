@@ -1,0 +1,32 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+venv/
+.venv/
+
+# ---- 运行产物（报告 / 证据链 / 上传暂存）----
+output/
+demo-output/
+irlog-output/
+evidence/
+demo-evidence/
+*.html.tmp
+
+# ---- 便携包内置 Python 运行时（体积大，不入库）----
+ir-log-analyzer-portable/python/
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+*.swp
+
+# ---- 本地调试 ----
+*.log
+!tests/fixtures/*.log

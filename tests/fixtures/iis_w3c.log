@@ -1,0 +1,9 @@
+#Software: Microsoft Internet Information Services 10.0
+#Version: 1.0
+#Date: 2026-10-14 11:00:00
+#Fields: date time s-ip cs-method cs-uri-stem cs-uri-query s-port cs-username c-ip cs(User-Agent) sc-status sc-bytes time-taken
+2026-10-14 11:00:01 10.0.0.1 GET /index.aspx - 80 - 192.168.1.20 Mozilla/5.0 200 2048 15
+2026-10-14 11:00:02 10.0.0.1 POST /upload/skin.aspx - 80 - 203.0.113.77 python-requests/2.31 200 300 20
+2026-10-14 11:00:03 10.0.0.1 GET /default.aspx id=1%27+or+1%3D1-- 80 - 203.0.113.77 sqlmap/1.7.5 200 4096 10
+2026-10-14 11:00:04 10.0.0.1 GET /api/v1/../../appsettings.json - 80 - 203.0.113.77 curl/8.0 404 0 2
+2026-10-14 11:00:05 10.0.0.1 GET /reports/2026-full.pdf - 80 corp\zhang 192.168.1.20 Mozilla/5.0 200 104857600 800

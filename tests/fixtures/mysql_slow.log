@@ -1,0 +1,10 @@
+# Time: 2026-10-14T10:20:01.123456Z
+# User@Host: appuser[appuser] @ 10.0.0.30 []  Id:   501
+# Query_time: 12.345678  Lock_time: 0.001000 Rows_sent: 1  Rows_examined: 5000000
+SET timestamp=1760438401;
+SELECT * FROM users WHERE email LIKE '%a%' ORDER BY created_at;
+# Time: 2026-10-14T10:21:01.123456Z
+# User@Host: appuser[appuser] @ 10.0.0.30 []  Id:   502
+# Query_time: 30.100000  Lock_time: 0.002000 Rows_sent: 1  Rows_examined: 9000000
+SET timestamp=1760438461;
+SELECT * FROM users WHERE id = 99 UNION ALL SELECT card_no, cvv FROM payment_cards;

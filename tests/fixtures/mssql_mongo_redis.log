@@ -1,0 +1,21 @@
+2026-10-14 10:05:01.10 Logon       Login failed for user 'sa'. Reason: Password did not match that for the login provided. [CLIENT: 198.51.100.9]
+2026-10-14 10:05:02.10 Logon       Login failed for user 'sa'. Reason: Password did not match that for the login provided. [CLIENT: 198.51.100.9]
+2026-10-14 10:05:03.10 Logon       Login failed for user 'admin'. Reason: Could not find a login matching the name provided. [CLIENT: 198.51.100.9]
+2026-10-14 10:05:04.10 Logon       Login failed for user 'sa'. Reason: Password did not match that for the login provided. [CLIENT: 198.51.100.9]
+2026-10-14 10:05:05.10 Logon       Login failed for user 'sa'. Reason: Password did not match that for the login provided. [CLIENT: 198.51.100.9]
+2026-10-14 10:05:06.10 Logon       Login failed for user 'sa'. Reason: Password did not match that for the login provided. [CLIENT: 198.51.100.9]
+2026-10-14 10:05:30.10 Logon       Login succeeded for user 'sa'. [CLIENT: 198.51.100.9]
+2026-10-14 10:05:31.10 spid55      EXEC sp_configure 'show advanced options', 1
+2026-10-14 10:05:32.10 spid55      EXEC xp_cmdshell 'whoami'
+{"t":{"$date":"2026-10-14T10:10:01.100+08:00"},"s":"I","c":"ACCESS","id":20249,"ctx":"conn11","msg":"Authentication failed","attr":{"client":"203.0.113.200:51001","mechanism":"SCRAM-SHA-256","user":"admin","db":"admin","result":"UserNotFound"}}
+{"t":{"$date":"2026-10-14T10:10:02.100+08:00"},"s":"I","c":"ACCESS","id":20249,"ctx":"conn12","msg":"Authentication failed","attr":{"client":"203.0.113.200:51002","mechanism":"SCRAM-SHA-256","user":"root","db":"admin","result":"AuthenticationFailed"}}
+{"t":{"$date":"2026-10-14T10:10:03.100+08:00"},"s":"I","c":"ACCESS","id":20249,"ctx":"conn13","msg":"Authentication failed","attr":{"client":"203.0.113.200:51003","mechanism":"SCRAM-SHA-256","user":"admin","db":"admin","result":"AuthenticationFailed"}}
+{"t":{"$date":"2026-10-14T10:10:04.100+08:00"},"s":"I","c":"ACCESS","id":20249,"ctx":"conn14","msg":"Authentication failed","attr":{"client":"203.0.113.200:51004","mechanism":"SCRAM-SHA-256","user":"admin","db":"admin","result":"AuthenticationFailed"}}
+{"t":{"$date":"2026-10-14T10:10:05.100+08:00"},"s":"I","c":"ACCESS","id":20249,"ctx":"conn15","msg":"Authentication failed","attr":{"client":"203.0.113.200:51005","mechanism":"SCRAM-SHA-256","user":"admin","db":"admin","result":"AuthenticationFailed"}}
+{"t":{"$date":"2026-10-14T10:10:06.100+08:00"},"s":"I","c":"ACCESS","id":20249,"ctx":"conn16","msg":"Authentication failed","attr":{"client":"203.0.113.200:51006","mechanism":"SCRAM-SHA-256","user":"admin","db":"admin","result":"AuthenticationFailed"}}
+1:M 14 Oct 2026 10:15:01.123 * Ready to accept connections tcp
+1:M 14 Oct 2026 10:15:02.123 # WARNING Auth fail id=8 addr=203.0.113.211:55555
+1:M 14 Oct 2026 10:15:03.123 # WARNING Auth fail id=9 addr=203.0.113.211:55556
+1:M 14 Oct 2026 10:15:04.123 # WARNING Auth fail id=10 addr=203.0.113.211:55557
+1:M 14 Oct 2026 10:15:05.123 # WARNING Auth fail id=11 addr=203.0.113.211:55558
+1:M 14 Oct 2026 10:15:06.123 # WARNING Auth fail id=12 addr=203.0.113.211:55559

@@ -1,0 +1,24 @@
+2026-10-14T09:58:01.100000Z 11 [Note] [MY-010931] [Server] /usr/sbin/mysqld: ready for connections.
+2026-10-14T09:58:05.100000Z 12 [Warning] [MY-010926] [Server] Access denied for user 'root'@'203.0.113.55' (using password: YES)
+2026-10-14T09:58:06.100000Z 13 [Warning] [MY-010926] [Server] Access denied for user 'root'@'203.0.113.55' (using password: YES)
+2026-10-14T09:58:07.100000Z 14 [Warning] [MY-010926] [Server] Access denied for user 'admin'@'203.0.113.55' (using password: YES)
+2026-10-14T09:58:08.100000Z 15 [Warning] [MY-010926] [Server] Access denied for user 'test'@'203.0.113.55' (using password: YES)
+2026-10-14T09:58:09.100000Z 16 [Warning] [MY-010926] [Server] Access denied for user 'mysql'@'203.0.113.55' (using password: YES)
+2026-10-14T09:58:10.100000Z 17 [Warning] [MY-010926] [Server] Access denied for user 'root'@'203.0.113.55' (using password: YES)
+2026-10-14T09:58:11.100000Z 18 [Warning] [MY-010926] [Server] Access denied for user 'root'@'203.0.113.55' (using password: NO)
+2026-10-14T09:58:20.100000Z 20 [Note] [MY-010926] [Server] Aborted connection 20 to db: 'unconnected' user: 'root' host: '203.0.113.55' (Got timeout reading communication packets)
+2026-10-14T09:59:01.100000Z	   21 Connect	root@localhost on  using Socket
+2026-10-14T09:59:02.100000Z	   21 Query	SELECT @@version_comment LIMIT 1
+2026-10-14T09:59:10.100000Z	   22 Connect	appuser@10.0.0.30 on shopdb using TCP/IP
+2026-10-14T09:59:11.100000Z	   22 Query	SELECT id, name FROM products WHERE category = 'book'
+2026-10-14T09:59:12.100000Z	   22 Query	SELECT id, name FROM products WHERE id = 1 UNION SELECT username, password FROM users
+2026-10-14T09:59:13.100000Z	   22 Query	SELECT * FROM orders WHERE user_id = 1 AND SLEEP(5)
+2026-10-14T09:59:14.100000Z	   22 Query	SELECT * FROM users WHERE id = 1 OR 1=1
+2026-10-14T09:59:15.100000Z	   22 Query	SELECT LOAD_FILE('/etc/passwd')
+2026-10-14T09:59:16.100000Z	   22 Query	SELECT * FROM accounts INTO OUTFILE '/tmp/dump.csv'
+2026-10-14T09:59:17.100000Z	   22 Query	DROP TABLE orders
+2026-10-14T09:59:18.100000Z	   22 Query	GRANT ALL PRIVILEGES ON *.* TO 'backdoor'@'%'
+2026-10-14T09:59:19.100000Z	   22 Query	CREATE FUNCTION sys_exec RETURNS STRING SONAME 'udf.so'
+2026-10-14T09:59:20.100000Z	   23 Connect	appuser@10.0.0.30 on shopdb using TCP/IP
+2026-10-14T09:59:21.100000Z	   23 Query	UPDATE products SET price = 9.9 WHERE id = 5
+2026-10-14T09:59:22.100000Z	   23 Query	DELETE FROM sessions WHERE expired < NOW()
