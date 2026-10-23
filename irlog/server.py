@@ -29,7 +29,7 @@ from .audit import AuditLog
 from .config import Config
 from .detectors import ALL_DETECTORS, IOCStore
 from .engine import run_analysis
-from .evidence import EvidenceSet, chain_of_custody, sha256_file
+from .evidence import EvidenceSet, chain_of_custody, sha256_file, write_json
 from .parsers import detect_parser
 from .report_html import write_html_report
 from .report_json import write_json_report
@@ -211,6 +211,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_rulepack_import(self._read_body(length))
             elif path == "/api/rulepack/test":
                 self._api_rulepack_test(self._read_body(length))
+            elif path == "/api/file-source":
+                self._api_file_source(self._read_body(length))
             else:
                 self._send_json({"error": "not found"}, 404)
         except BrokenPipeError:
@@ -286,8 +288,11 @@ class Handler(BaseHTTPRequestHandler):
     def _api_files(self):
         base = self.state.evidence_dir
         items = []
+        sources = self._load_sources()
         if os.path.isdir(base):
             for name in sorted(os.listdir(base)):
+                if name.startswith("."):  # 跳过隐藏文件（含 .sources.json 元数据）
+                    continue
                 p = os.path.join(base, name)
                 if os.path.isfile(p):
                     try:
@@ -297,11 +302,49 @@ class Handler(BaseHTTPRequestHandler):
                             "size": os.path.getsize(p),
                             "sha256": sha256_file(p),
                             "log_type": parser.name if parser else "generic",
+                            "mtime_iso": time.strftime("%Y-%m-%d %H:%M:%S",
+                                                       time.localtime(os.path.getmtime(p))),
+                            "source": sources.get(name, ""),
                             "selected": True,
                         })
                     except OSError:
                         continue
         self._send_json(items)
+
+    # ---- 证据「日志来源」标签（sidecar 存储）----
+    def _sources_path(self) -> str:
+        return os.path.join(self.state.evidence_dir, ".sources.json")
+
+    def _load_sources(self) -> dict:
+        try:
+            with open(self._sources_path(), encoding="utf-8") as f:
+                d = json.load(f)
+                return d if isinstance(d, dict) else {}
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return {}
+
+    def _save_sources(self, d: dict) -> None:
+        write_json(self._sources_path(), d)
+
+    def _api_file_source(self, body: dict) -> None:
+        name = os.path.basename(str(body.get("name") or ""))
+        if not name:
+            self._send_json({"error": "缺少文件名"}, 400)
+            return
+        full = os.path.join(self.state.evidence_dir, name)
+        if not os.path.isfile(full):
+            self._send_json({"error": "证据文件不存在"}, 404)
+            return
+        source = str(body.get("source") or "").strip()
+        sources = self._load_sources()
+        if source:
+            sources[name] = source
+        else:
+            sources.pop(name, None)  # 清空标签
+        self._save_sources(sources)
+        self.state.audit.record(self.client_address[0], "set-source",
+                                file=name, source=source)
+        self._send_json({"ok": True, "name": name, "source": source})
 
     def _ioc_files(self):
         out = []
@@ -407,13 +450,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def _run_task(self, task: Task, operator: str, cfg: Config) -> None:
         try:
+            sources = self._load_sources()
             evidence = EvidenceSet()
             for p in task.paths:
-                evidence.add_file(p)
+                item = evidence.add_file(p)
+                item.source = sources.get(os.path.basename(p), "")
             pack = RulePack.load(self.state.workdir)
             result = run_analysis(task.paths, cfg, self.state.ioc_store,
                                   progress=lambda msg, frac: self._update(task, msg, frac),
                                   rulepack=pack, workdir=self.state.workdir)
+            # 把「日志来源 / 上传日期」注入报告的证据明细，使报告中心也能展示
+            ev_by_path = {i.path: i for i in evidence.items}
+            for f in result.files:
+                it = ev_by_path.get(f.get("path")) or ev_by_path.get(
+                    os.path.abspath(f.get("path", "")))
+                if it:
+                    f["source"] = it.source
+                    f["mtime_iso"] = it.mtime_iso
+                    f["size"] = it.size
+                    f["sha256"] = it.sha256
             custody = chain_of_custody(result.run_id, operator, evidence,
                                        result.started, result.finished, __version__)
             prefix = os.path.join(self.state.workdir, result.run_id)

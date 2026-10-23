@@ -13,6 +13,8 @@ const state = {
   task: null,
   polling: false,
   runs: [],
+  search: '',         // 证据表格搜索关键词（来源 / 文件名）
+  sort: { key: null, dir: 1 },  // 证据表格排序：key=列字段, dir=1 升序 / -1 降序
 };
 
 /* ---------- 工具 ---------- */
@@ -76,20 +78,77 @@ async function refreshFiles() {
 
 function renderFiles() {
   const tb = $('#fileTable tbody');
-  if (!state.files.length) {
-    tb.innerHTML = '<tr><td colspan="6" class="empty"><span class="big">📂</span>暂无证据文件，拖拽上传或点击上方选择</td></tr>';
+  // 1) 搜索过滤（来源 / 文件名，不区分大小写）
+  const q = (state.search || '').trim().toLowerCase();
+  let rows = state.files;
+  if (q) {
+    rows = rows.filter((f) =>
+      (f.name || '').toLowerCase().includes(q) ||
+      (f.source || '').toLowerCase().includes(q));
+  }
+  // 2) 排序
+  const { key, dir } = state.sort;
+  if (key) {
+    rows = rows.slice().sort((a, b) => {
+      let va = a[key], vb = b[key];
+      if (key === 'size') { va = va || 0; vb = vb || 0; }
+      else { va = (va == null ? '' : String(va)).toLowerCase(); vb = (vb == null ? '' : String(vb)).toLowerCase(); }
+      if (va < vb) return -1 * dir;
+      if (va > vb) return 1 * dir;
+      return 0;
+    });
+  }
+  if (!rows.length) {
+    const msg = q ? '🔍 没有匹配的文件' : '📂 暂无证据文件，拖拽上传或点击上方选择';
+    tb.innerHTML = `<tr><td colspan="8" class="empty"><span class="big"></span>${msg}</td></tr>`;
   } else {
-    tb.innerHTML = state.files.map((f) => `
+    tb.innerHTML = rows.map((f) => `
       <tr>
         <td><input type="checkbox" class="fileChk" data-name="${esc(f.name)}" ${state.selected.has(f.name) ? 'checked' : ''}></td>
         <td class="mono">${esc(f.name)}</td>
         <td class="nowrap">${fmtSize(f.size)}</td>
         <td><span class="badge type">${esc(f.log_type || 'generic')}</span></td>
+        <td class="nowrap mono">${esc(f.mtime_iso || '-')}</td>
+        <td><input type="text" class="src-input" data-src="${esc(f.name)}" value="${esc(f.source || '')}" placeholder="填写来源…" title="填写该证据的来源（如 Web服务器-01 / 域控DC01），回车或失焦保存"></td>
         <td class="mono" title="${esc(f.sha256)}">${esc((f.sha256 || '').slice(0, 20))}…</td>
         <td><button class="small danger" data-del="${esc(f.name)}" title="删除该证据文件（不可恢复，记入审计）">🗑 删除</button></td>
       </tr>`).join('');
   }
   $('#selCount').textContent = `已选 ${state.selected.size} / ${state.files.length} 个文件`;
+  updateSortHeaders();
+}
+
+function onFileSearch() {
+  state.search = $('#fileSearch').value || '';
+  renderFiles();
+}
+
+function sortBy(key) {
+  if (state.sort.key === key) state.sort.dir *= -1;
+  else { state.sort.key = key; state.sort.dir = 1; }
+  renderFiles();
+}
+
+function updateSortHeaders() {
+  $$('#fileTable thead th.sortable').forEach((th) => {
+    const ind = th.querySelector('.sort-ind');
+    if (!ind) return;
+    ind.textContent = (th.dataset.sort === state.sort.key)
+      ? (state.sort.dir === 1 ? '▲' : '▼') : '';
+  });
+}
+
+async function saveSource(name, value) {
+  try {
+    await api('/api/file-source', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, source: value }),
+    });
+    const f = state.files.find((x) => x.name === name);
+    if (f) f.source = value;
+    toast('已保存来源：' + (value || '（已清空）'), 'ok');
+  } catch (e) { toast('保存来源失败: ' + e.message, 'err'); }
 }
 
 function selectAll(on) {
@@ -302,6 +361,8 @@ function renderSummary() {
     <tr><td class="mono">${esc((f.path || '').split(/[\\\/]/).pop())}</td>
         <td><span class="badge type">${esc(f.log_type || '-')}</span></td>
         <td>${fmtNum(f.events)}</td>
+        <td class="hint">${esc(f.source || '-')}</td>
+        <td class="nowrap mono">${esc(f.mtime_iso || '-')}</td>
         <td class="hint">${esc(f.skipped_reason || '')}</td></tr>`).join('');
   const dlJson = $('#dlJson'), dlHtml = $('#dlHtml');
   dlJson.href = '/api/report/' + encodeURIComponent(d.run_id) + '?format=json';
@@ -313,8 +374,8 @@ function renderSummary() {
   const tbl = document.createElement('div');
   tbl.id = 'fileSummaryTable';
   tbl.innerHTML = `<h3>证据解析明细</h3>
-    <table class="grid"><thead><tr><th>文件</th><th>识别类型</th><th>事件数</th><th>备注</th></tr></thead>
-    <tbody>${files || '<tr><td colspan="4" class="hint">无</td></tr>'}</tbody></table>`;
+    <table class="grid"><thead><tr><th>文件</th><th>识别类型</th><th>事件数</th><th>来源</th><th>上传日期</th><th>备注</th></tr></thead>
+    <tbody>${files || '<tr><td colspan="6" class="hint">无</td></tr>'}</tbody></table>`;
   card.appendChild(tbl);
 }
 
@@ -963,6 +1024,21 @@ function init() {
     if (cb.checked) state.selected.add(name); else state.selected.delete(name);
     $('#selCount').textContent = `已选 ${state.selected.size} / ${state.files.length} 个文件`;
     renderChips();
+  });
+  // 表头点击排序
+  $('#fileTable thead').addEventListener('click', (e) => {
+    const th = e.target.closest('th.sortable');
+    if (th && th.dataset.sort) sortBy(th.dataset.sort);
+  });
+  // 日志来源输入框（失焦 / 回车保存）
+  $('#fileTable tbody').addEventListener('change', (e) => {
+    const inp = e.target;
+    if (!inp.classList.contains('src-input')) return;
+    saveSource(inp.dataset.src, inp.value.trim());
+  });
+  $('#fileTable tbody').addEventListener('keydown', (e) => {
+    const inp = e.target;
+    if (inp.classList && inp.classList.contains('src-input') && e.key === 'Enter') inp.blur();
   });
   // 拖拽上传
   const dz = $('#dropzone'), fi = $('#fileInput');

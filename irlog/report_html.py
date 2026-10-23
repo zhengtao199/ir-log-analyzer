@@ -431,14 +431,17 @@ def build_html(result, custody: dict) -> str:
         f"<td>{esc(i.get('log_type') or '-')}</td>"
         f"<td>{_fmt_size(i['size'])}</td>"
         f"<td class='mono hash' title='{esc(i['sha256'])}'>{esc(i['sha256'])}</td>"
-        f"<td class='mono'>{esc(i['mtime_iso'])}</td></tr>"
+        f"<td class='mono'>{esc(i['mtime_iso'])}</td>"
+        f"<td>{esc(i.get('source') or '-')}</td></tr>"
         for i in custody.get("evidence", {}).get("items", [])
     )
 
     # 文件处理结果表
     file_rows = "".join(
         f"<tr><td class='mono'>{esc(f['path'])}</td><td>{esc(f.get('log_type') or '-')}</td>"
-        f"<td>{f['events']}</td><td>{esc(f.get('skipped_reason') or '')}</td></tr>"
+        f"<td>{f['events']}</td><td>{esc(f.get('skipped_reason') or '')}</td>"
+        f"<td>{esc(f.get('source') or '-')}</td>"
+        f"<td class='mono'>{esc(f.get('mtime_iso') or '-')}</td></tr>"
         for f in d["files"]
     )
 
@@ -552,7 +555,7 @@ def build_html(result, custody: dict) -> str:
   <div class="kv"><b>完整性说明:</b> {esc(custody.get('evidence_integrity', ''))}</div>
   <div class="kv"><b>分析开始:</b> {esc(custody.get('analysis_started', ''))} &nbsp; <b>分析结束:</b> {esc(custody.get('analysis_finished', ''))}</div>
   <table style="margin-top:10px">
-    <tr><th>证据文件</th><th>识别类型</th><th>大小</th><th>SHA256</th><th>修改时间</th></tr>
+    <tr><th>证据文件</th><th>识别类型</th><th>大小</th><th>SHA256</th><th>修改时间</th><th>日志来源</th></tr>
     {ev_rows}
   </table>
 </div>
@@ -560,7 +563,7 @@ def build_html(result, custody: dict) -> str:
 <div class="card">
   <h2>十、证据文件处理明细</h2>
   <table>
-    <tr><th>文件</th><th>解析器</th><th>解析事件数</th><th>跳过/异常原因</th></tr>
+    <tr><th>文件</th><th>解析器</th><th>解析事件数</th><th>跳过/异常原因</th><th>日志来源</th><th>上传日期</th></tr>
     {file_rows}
   </table>
 </div>

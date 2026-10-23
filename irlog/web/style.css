@@ -115,6 +115,17 @@ table.grid tbody tr:nth-child(even) { background: #fafbfc; }
 table.grid tbody tr:hover { background: var(--accent-light); }
 table.grid .actions { white-space: nowrap; }
 table.grid .actions button, table.grid .actions .btn { margin-right: 6px; }
+/* 可排序列头 */
+table.grid th.sortable { cursor: pointer; user-select: none; }
+table.grid th.sortable:hover { background: #e8eef5; }
+table.grid th .sort-ind { color: var(--accent); font-size: 11px; margin-left: 2px; }
+/* 证据表格：来源输入框 / 搜索框 */
+.src-input { width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 12px;
+  border: 1px solid var(--border); border-radius: 4px; background: #fff; }
+.src-input:focus { outline: none; border-color: var(--accent); }
+.file-search { padding: 6px 10px; font-size: 13px; border: 1px solid var(--border);
+  border-radius: 6px; min-width: 200px; }
+.file-search:focus { outline: none; border-color: var(--accent); }
 
 /* ---------- 徽章 ---------- */
 .badge {

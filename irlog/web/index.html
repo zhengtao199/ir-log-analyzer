@@ -46,6 +46,7 @@
       <button class="ghost" onclick="refreshFiles()">🔄 刷新列表</button>
       <button class="ghost" onclick="selectAll(true)">全选</button>
       <button class="ghost" onclick="selectAll(false)">全不选</button>
+      <input type="text" id="fileSearch" class="file-search" placeholder="🔍 搜索来源 / 文件名…" oninput="onFileSearch()" style="margin-left:8px">
       <span class="spacer"></span>
       <span class="hint" id="selCount"></span>
       <button onclick="gotoAnalyze()">下一步：分析 →</button>
@@ -53,7 +54,16 @@
     <div class="hint" id="uploadStatus" style="margin-top:6px"></div>
     <div style="overflow-x:auto; margin-top:10px">
       <table class="grid" id="fileTable">
-        <thead><tr><th style="width:36px"></th><th>文件名</th><th>大小</th><th>识别类型</th><th>SHA256</th><th style="width:72px">操作</th></tr></thead>
+        <thead><tr>
+          <th style="width:36px"></th>
+          <th data-sort="name" class="sortable">文件名 <span class="sort-ind"></span></th>
+          <th data-sort="size" class="sortable">大小 <span class="sort-ind"></span></th>
+          <th data-sort="log_type" class="sortable">识别类型 <span class="sort-ind"></span></th>
+          <th data-sort="mtime_iso" class="sortable">上传日期 <span class="sort-ind"></span></th>
+          <th data-sort="source" class="sortable">日志来源 <span class="sort-ind"></span></th>
+          <th data-sort="sha256" class="sortable">SHA256 <span class="sort-ind"></span></th>
+          <th style="width:72px">操作</th>
+        </tr></thead>
         <tbody></tbody>
       </table>
     </div>

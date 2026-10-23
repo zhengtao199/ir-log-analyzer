@@ -34,12 +34,13 @@ class EvidenceItem:
     mtime_iso: str
     log_type: Optional[str] = None
     lines_or_records: int = 0
+    source: Optional[str] = None  # 手动填写的「日志来源」标签（存于 evidence/.sources.json）
 
     def to_dict(self) -> dict:
         return asdict(self)
 
 
-def build_evidence_item(path: str) -> EvidenceItem:
+def build_evidence_item(path: str, source: Optional[str] = None) -> EvidenceItem:
     st = os.stat(path)
     return EvidenceItem(
         path=os.path.abspath(path),
@@ -47,6 +48,7 @@ def build_evidence_item(path: str) -> EvidenceItem:
         sha256=sha256_file(path),
         mtime=st.st_mtime,
         mtime_iso=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime)),
+        source=source,
     )
 
 
