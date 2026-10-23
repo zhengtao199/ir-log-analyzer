@@ -25,6 +25,9 @@
   <button class="tab" data-tab="timeline">📈 时间线</button>
   <button class="tab" data-tab="ioc">🎯 IOC 情报<span class="pill" id="iocPill" style="display:none"></span></button>
   <button class="tab" data-tab="reports">📄 报告中心</button>
+  <button class="tab" data-tab="types">🧩 类型分析<span class="pill" id="typePill" style="display:none"></span></button>
+  <button class="tab" data-tab="rules">📚 规则库</button>
+  <button class="tab" data-tab="playbook">📋 应急剧本<span class="pill" id="pbPill" style="display:none"></span></button>
   <button class="tab" data-tab="audit">🧾 审计日志</button>
 </nav>
 
@@ -44,6 +47,7 @@
       <button class="ghost" onclick="refreshFiles()">🔄 刷新列表</button>
       <button class="ghost" onclick="selectAll(true)">全选</button>
       <button class="ghost" onclick="selectAll(false)">全不选</button>
+      <input type="text" id="fileSearch" class="file-search" placeholder="🔍 搜索来源 / 文件名…" oninput="onFileSearch()" style="margin-left:8px">
       <span class="spacer"></span>
       <span class="hint" id="selCount"></span>
       <button onclick="gotoAnalyze()">下一步：分析 →</button>
@@ -51,7 +55,16 @@
     <div class="hint" id="uploadStatus" style="margin-top:6px"></div>
     <div style="overflow-x:auto; margin-top:10px">
       <table class="grid" id="fileTable">
-        <thead><tr><th style="width:36px"></th><th>文件名</th><th>大小</th><th>识别类型</th><th>SHA256</th><th style="width:72px">操作</th></tr></thead>
+        <thead><tr>
+          <th style="width:36px"></th>
+          <th data-sort="name" class="sortable">文件名 <span class="sort-ind"></span></th>
+          <th data-sort="size" class="sortable">大小 <span class="sort-ind"></span></th>
+          <th data-sort="log_type" class="sortable">识别类型 <span class="sort-ind"></span></th>
+          <th data-sort="mtime_iso" class="sortable">上传日期 <span class="sort-ind"></span></th>
+          <th data-sort="source" class="sortable">日志来源 <span class="sort-ind"></span></th>
+          <th data-sort="sha256" class="sortable">SHA256 <span class="sort-ind"></span></th>
+          <th style="width:72px">操作</th>
+        </tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -133,6 +146,7 @@
         <input type="text" id="alertSearch" oninput="renderAlerts()" placeholder="输入关键词，如 192.168 / shell.php">
       </label>
       <button class="ghost" onclick="exportFiltered()">⬇ 导出筛选结果 JSON</button>
+      <button class="ghost" id="btnPlaybook" style="display:none" onclick="downloadPlaybook()">📕 下载处置手册</button>
     </div>
     <div id="alertList"></div>
   </div>
@@ -197,6 +211,62 @@
         <tbody></tbody>
       </table>
     </div>
+  </div>
+</section>
+
+<!-- ============ 8. 类型分析 ============ -->
+<section class="panel" id="tab-types">
+  <div class="card">
+    <h2>🧩 类型分析结论 <span class="sub">每类日志分别回答各自的应急问题</span></h2>
+    <div id="typeReports"></div>
+  </div>
+  <div class="card">
+    <h2>🌐 跨类型综合关联视图</h2>
+    <div id="correlationView"></div>
+  </div>
+</section>
+
+<!-- ============ 9. 规则库 ============ -->
+<section class="panel" id="tab-rules">
+  <div class="card">
+    <h2>📚 规则库 <span class="sub">查看内置规则 payload · 给自己环境的特征追加 / 新建规则分类 · 导入导出</span></h2>
+    <div class="row">
+      <button onclick="refreshRules()">🔄 刷新</button>
+      <button onclick="openRuleEditor(null)">➕ 新建规则</button>
+      <button class="ghost" onclick="exportRules()">⬇ 导出规则包</button>
+      <button class="ghost" onclick="document.getElementById('importFile').click()">⬆ 导入规则包</button>
+      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importRulesFile(this)">
+      <span class="spacer"></span>
+      <span class="hint" id="ruleMeta"></span>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label class="field" style="flex:1;min-width:220px">搜索
+        <input type="text" id="ruleSearch" oninput="renderRules()" placeholder="规则 ID / 名称 / 特征内容">
+      </label>
+    </div>
+    <div style="overflow-x:auto;margin-top:10px">
+      <table class="grid" id="ruleTable">
+        <thead><tr><th>规则 ID</th><th>名称</th><th>级别</th><th>归属</th><th>匹配范围</th><th>特征数</th><th>状态</th><th style="width:160px">操作</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🔍 内置规则 payload 清单 <span class="sub">与检测器源码同源（只读参考）</span></h2>
+    <div id="builtinRules"></div>
+  </div>
+</section>
+
+<!-- ============ 应急剧本（综合处置总剧本） ============ -->
+<section class="panel" id="tab-playbook">
+  <div class="card">
+    <h2>📋 应急响应处置总剧本 <span class="sub">按阶段综合所有处置动作 · 每步标注「需要看什么」</span></h2>
+    <div class="row">
+      <button id="btnExportMaster" class="ghost" onclick="downloadMasterHtml()">⬇ 导出独立 HTML（可收藏 / 打印）</button>
+      <span class="hint">本页基于当前分析结果自动整合；命令仅用于复制执行，工具不执行任何命令、不对目标主机做任何写操作。</span>
+    </div>
+    <div id="playbookRoot"></div>
   </div>
 </section>
 

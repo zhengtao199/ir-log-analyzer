@@ -27,6 +27,7 @@
   <button class="tab" data-tab="reports">📄 报告中心</button>
   <button class="tab" data-tab="types">🧩 类型分析<span class="pill" id="typePill" style="display:none"></span></button>
   <button class="tab" data-tab="rules">📚 规则库</button>
+  <button class="tab" data-tab="playbook">📋 应急剧本<span class="pill" id="pbPill" style="display:none"></span></button>
   <button class="tab" data-tab="audit">🧾 审计日志</button>
 </nav>
 
@@ -254,6 +255,18 @@
   <div class="card">
     <h2>🔍 内置规则 payload 清单 <span class="sub">与检测器源码同源（只读参考）</span></h2>
     <div id="builtinRules"></div>
+  </div>
+</section>
+
+<!-- ============ 应急剧本（综合处置总剧本） ============ -->
+<section class="panel" id="tab-playbook">
+  <div class="card">
+    <h2>📋 应急响应处置总剧本 <span class="sub">按阶段综合所有处置动作 · 每步标注「需要看什么」</span></h2>
+    <div class="row">
+      <button id="btnExportMaster" class="ghost" onclick="downloadMasterHtml()">⬇ 导出独立 HTML（可收藏 / 打印）</button>
+      <span class="hint">本页基于当前分析结果自动整合；命令仅用于复制执行，工具不执行任何命令、不对目标主机做任何写操作。</span>
+    </div>
+    <div id="playbookRoot"></div>
   </div>
 </section>
 

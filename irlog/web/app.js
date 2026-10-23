@@ -63,6 +63,7 @@ function switchTab(name) {
   if (name === 'alerts') renderAlerts();
   if (name === 'types') renderTypes();
   if (name === 'rules') refreshRules();
+  if (name === 'playbook') renderPlaybook();
 }
 
 /* ---------- 证据管理 ---------- */
@@ -503,6 +504,351 @@ function exportFiltered() {  const list = filteredAlerts();
   URL.revokeObjectURL(a.href);
   toast(`已导出 ${list.length} 条告警`, 'ok');
 }
+
+/* ---------- 应急剧本（综合处置总剧本） ---------- */
+/* 把已有的阶段式处置方案（ir_plan：确认→遏制→根除→恢复→加固）与每条告警剧本里的
+   「固定证据」阶段合并，整理成 6 阶段端到端总剧本；并为每个步骤补上「需要看什么」
+   （本案件真实数据 + 工具内面板跳转 + 通用排查指引）。 */
+const MASTER_PHASES = [
+  { key: 'confirm',   n: 0, title: '第 0 阶段 · 事件确认与取证保全', goal: '确认攻击是否真实成功，固化证据，避免破坏现场' },
+  { key: 'contain',   n: 1, title: '第 1 阶段 · 紧急遏制（0~2 小时）', goal: '切断攻击者当前的控制与横向通道，止血' },
+  { key: 'preserve',  n: 2, title: '第 2 阶段 · 证据固定', goal: '在删除 / 杀进程前先取走易失证据（进程、连接、日志）' },
+  { key: 'eradicate', n: 3, title: '第 3 阶段 · 根除清除（2~24 小时）', goal: '清除后门、漏洞入口与持久化，夺回控制权' },
+  { key: 'recover',   n: 4, title: '第 4 阶段 · 恢复与验证（24~72 小时）', goal: '恢复业务并验证无残留后门' },
+  { key: 'harden',    n: 5, title: '第 5 阶段 · 加固与复盘（事后）', goal: '补齐防护短板，形成检测与响应闭环' },
+];
+
+const CAT_LABEL = {
+  'brute-force': '暴力破解', 'webshell': 'Webshell 落盘', 'web-attack': 'Web 攻击/注入',
+  'attack-chain': '多阶段攻击链', 'account-abuse': '异常账号', 'exfiltration': '数据外传',
+  'ransomware': '勒索软件', 'command-obfuscation': '命令混淆', 'db-attack': '数据库攻击',
+  'net-anomaly': '流量异常', 'stream-content': '追踪流内容', 'http-content': 'HTTP 内容回显',
+  'upload_exploit': '上传漏洞利用', 'tooling': '攻击工具指纹', 'admin_login': '后台登录爆破', 'ioc': 'IOC 命中',
+};
+
+const PHASE_WATCH = {
+  confirm:   { panels: [['告警看板', 'alerts'], ['时间线', 'timeline'], ['类型分析', 'types']],
+               tip: '先确认告警真伪、排除误报：结合时间线与类型分析结论判断攻击是否真实成功，避免对正常业务误处置。' },
+  contain:   { panels: [['告警看板', 'alerts'], ['IOC 情报', 'ioc']],
+               tip: '遏制会切断攻击者通道，先核对要封禁的 IP / 账号是否确属攻击者，避免误伤业务；优先在边界 + 主机防火墙双封。' },
+  preserve:  { panels: [['证据管理', 'evidence'], ['审计日志', 'audit']],
+               tip: '取证动作必须在任何删除 / 杀进程之前完成——内存与进程线索断电即失，先留证再处置；证据全程只读。' },
+  eradicate: { panels: [['类型分析', 'types'], ['告警看板', 'alerts']],
+               tip: '根除后必须二次验证：清除 Webshell / 后门后要全盘排查同类文件与持久化（计划任务、服务、启动项）。' },
+  recover:   { panels: [['时间线', 'timeline'], ['报告中心', 'reports']],
+               tip: '恢复前确认有攻击发生前的干净备份；恢复后重跑一次分析，确认攻击者 IP 不再出现、无二次入侵。' },
+  harden:    { panels: [['规则库', 'rules'], ['类型分析', 'types']],
+               tip: '把本次成因沉淀为检测规则与监控；日志集中留存不少于 6 个月，Web 目录做文件完整性（FIM）监控。' },
+};
+
+const TOPIC_TIP = {
+  'webshell': '重点看证据链时间线里 Webshell 首次被访问的时间窗，以及类型分析中的落盘脚本判定依据。',
+  'upload_exploit': '看类型分析的「上传利用链」结论，确认上传接口路径与落盘文件，先摘权限保留文件再取证。',
+  'attack-chain': '看时间线上「登录→上传→落盘→交互」的完整链条，确认关键时间节点。',
+  'admin_login': '看类型分析里的账号结论，确认是否存在新增 / 提权账号与后台成功登录。',
+  'account-abuse': '看 Windows/Linux 账号结论，确认是否有新增 / 启用 / 加入特权组的账号。',
+  'brute-force': '看登录结论，确认是否出现成功登录（Windows 4624 / Linux Accepted），出现即视为口令失陷。',
+  'web-attack': '看 Web 流量统计与访问日志，区分扫描（404 居多）与成功利用（200 且响应异常大）。',
+  'exfiltration': '看流量统计与抓包，确认外联目标 IP 与传输量，判断是业务同步还是外传。',
+  'net-anomaly': '看流量统计的端点与 DNS 查询，判断扫描 / 信标 / DGA。',
+  'stream-content': '看抓包追踪流内容，确认是反向 shell 还是正常管理会话。',
+  'http-content': '看 HTTP 响应体回显，确认是否真是命令回显 / 敏感文件内容。',
+  'ransomware': '看主机结论里的加密文件规模与删卷影动作，第一时间隔离防横向扩散。',
+  'command-obfuscation': '看进程 / 命令行结论，确认父进程是否来自办公 / 邮件软件（钓鱼）。',
+  'db-attack': '看数据库结论，确认是否有拖库 / 删表 / 后门表。',
+  'tooling': '看告警看板里该 IP 的全部分请求，判断是否自动化工具批量扫描。',
+  'ioc': '看 IOC 情报库命中项，确认进程是否仍在运行、哈希是否一致。',
+};
+
+function masterCtx(d) {
+  const corr = d.correlation || {};
+  const ws = d.web_stats || {};
+  const quiz = d.quiz || {};
+  const topShell = quiz.top_shell || {};
+  const topUpload = quiz.top_upload || {};
+  let ips = (corr.ip_profiles || []).map((p) => p.ip).filter(Boolean);
+  if (!ips.length && ws.top_src_ip) ips = ws.top_src_ip.map((x) => x.ip);
+  const accts = [];
+  (d.alerts || []).forEach((a) => {
+    if (a.rule_id === 'admin_login' || a.rule_id === 'account-abuse') {
+      const u = a.entities && (a.entities.user || a.entities.account || a.entities.target_users);
+      if (u) accts.push(Array.isArray(u) ? u[0] : u);
+    }
+  });
+  const hist = (d.timeline && d.timeline.hour_histogram) || {};
+  const keys = Object.keys(hist).sort();
+  return {
+    runId: d.run_id,
+    ips: ips.slice(0, 10),
+    shellFile: topShell.file || '',
+    shellPath: topShell.path || '',
+    uploadPath: topUpload.path || '',
+    accounts: [...new Set(accts)].slice(0, 8),
+    tlStart: keys[0] || '',
+    tlEnd: keys[keys.length - 1] || '',
+    totalEvents: (d.stats && d.stats.total_events) || 0,
+    alertCount: (d.alerts || []).length,
+    compromised: !!(d.ir_plan && d.ir_plan.compromised),
+    severity: (d.ir_plan && d.ir_plan.severity) || '',
+  };
+}
+
+function buildWatch(phase, category, ctx) {
+  const base = PHASE_WATCH[phase] || { panels: [], tip: '' };
+  const panels = base.panels.slice();
+  const data = [];
+  if (phase === 'confirm' || phase === 'contain') {
+    if (ctx.ips.length) data.push('攻击者IP: ' + ctx.ips.slice(0, 6).join('、'));
+  }
+  if (phase === 'preserve' || phase === 'eradicate') {
+    if (ctx.shellPath) data.push('Webshell路径: ' + ctx.shellPath);
+    if (ctx.shellFile) data.push('落盘文件: ' + ctx.shellFile);
+    if (ctx.uploadPath) data.push('上传漏洞接口: ' + ctx.uploadPath);
+  }
+  if (phase === 'contain' || phase === 'eradicate') {
+    if (ctx.accounts.length) data.push('涉事账号: ' + ctx.accounts.slice(0, 5).join('、'));
+  }
+  if (phase === 'confirm') {
+    if (ctx.tlStart) data.push('时间跨度: ' + ctx.tlStart + ' ~ ' + ctx.tlEnd);
+    data.push('事件总数: ' + ctx.totalEvents + ' · 告警: ' + ctx.alertCount);
+  }
+  let tip = base.tip;
+  if (category && TOPIC_TIP[category]) tip = tip + ' ' + TOPIC_TIP[category];
+  return { panels, data, tip };
+}
+
+function guessCategory(title, basis) {
+  const t = ((title || '') + ' ' + (basis || []).join(' ')).toLowerCase();
+  if (/webshell|落盘|一句话|后门/.test(t)) return 'webshell';
+  if (/上传|upload/.test(t)) return 'upload_exploit';
+  if (/后台|账号|口令|登录|特权|域/.test(t)) return 'account-abuse';
+  if (/扫描|注入|waf|sql/.test(t)) return 'web-attack';
+  if (/备份|恢复|复查/.test(t)) return 'recover';
+  if (/加固|防护|监控|基线/.test(t)) return 'harden';
+  if (/封禁|隔离|防火墙|ip/.test(t)) return 'contain';
+  return '';
+}
+
+function buildPreserveActions(d) {
+  const byCat = {};
+  (d.alerts || []).forEach((a) => {
+    const pb = a.playbook;
+    if (!pb || !pb.stages) return;
+    const st = (pb.stages || []).find((s) => s.key === 'preserve');
+    if (!st || !st.cmds || !st.cmds.length) return;
+    const cat = a.rule_id;
+    byCat[cat] = byCat[cat] || { cmds: [], basis: [] };
+    st.cmds.forEach((c) => {
+      if (!byCat[cat].cmds.find((x) => x.cmd === c.cmd)) byCat[cat].cmds.push(c);
+    });
+    byCat[cat].basis.push(a.title);
+  });
+  return Object.entries(byCat).map(([cat, v]) => ({
+    priority: 1, priority_label: 'P1-2小时内', category: cat,
+    title: '【' + (CAT_LABEL[cat] || cat) + '】固定易失证据',
+    detail: '在清除 / 杀进程之前，先把该攻击类型相关的内存、进程、连接与日志取证留存。',
+    commands: v.cmds, basis: [...new Set(v.basis)].slice(0, 3),
+  }));
+}
+
+function buildMaster(d) {
+  const ctx = masterCtx(d);
+  const plan = d.ir_plan || {};
+  const phaseMap = {};
+  (plan.phases || []).forEach((ph) => { phaseMap[ph.key] = ph; });
+  const preserveActions = buildPreserveActions(d);
+  const out = [];
+  MASTER_PHASES.forEach((mp) => {
+    let actions = [];
+    if (mp.key === 'preserve') {
+      actions = preserveActions;
+    } else {
+      const ph = phaseMap[mp.key];
+      actions = (ph && ph.actions || []).map((a) => ({
+        priority: a.priority, priority_label: a.priority_label,
+        title: a.title, detail: a.detail,
+        commands: (a.commands || []).map((c) => ({ cmd: c, note: '', platform: '' })),
+        basis: a.basis || [], category: '',
+      }));
+    }
+    actions = actions.map((a) => {
+      const cat = a.category || guessCategory(a.title, a.basis);
+      a.category = cat;
+      a.watch = buildWatch(mp.key, cat, ctx);
+      return a;
+    }).sort((x, y) => (x.priority == null ? 9 : x.priority) - (y.priority == null ? 9 : y.priority));
+    out.push(Object.assign({}, mp, { actions }));
+  });
+  return { phases: out, ctx, ioc: plan.ioc || [], milestones: plan.milestones || [], summary: plan.summary || {} };
+}
+
+function pbGoto(key) {
+  const el = document.getElementById('pbs-' + key);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function summaryHeader(m) {
+  const ctx = m.ctx;
+  const s = m.summary || {};
+  const succ = ctx.compromised ? '是（存在完整利用链 / Webshell）'
+    : (s['攻击是否成功'] || '待确认');
+  return `<div class="pb-summary">
+    <div class="pb-succ ${ctx.compromised ? 'bad' : ''}"><b>研判结论</b><span>${esc(ctx.severity || '未知')}</span></div>
+    <div class="pb-succ"><b>攻击是否成功</b><span>${esc(succ)}</span></div>
+    <div class="pb-succ"><b>攻击者IP</b><span class="mono">${esc((ctx.ips || []).slice(0, 8).join('、') || '—')}</span></div>
+    <div class="pb-succ"><b>告警 / 事件</b><span>${ctx.alertCount} / ${fmtNum(ctx.totalEvents)}</span></div>
+  </div>`;
+}
+
+function iocSection(ioc) {
+  if (!ioc || !ioc.length) return '';
+  return `<div class="card pb-ioc"><h3>🎯 IOC 情报清单（处置依据）</h3>`
+    + `<table class="grid"><thead><tr><th>类型</th><th>值</th><th>说明</th></tr></thead><tbody>`
+    + ioc.map((i) => `<tr><td><span class="badge type">${esc(i.type)}</span></td>`
+        + `<td class="mono">${esc(i.value)}</td><td class="hint">${esc(i.note || '')}</td></tr>`).join('')
+    + '</tbody></table></div>';
+}
+
+function actionCard(a) {
+  const w = a.watch || { panels: [], data: [], tip: '' };
+  const cmds = (a.commands || []).map((c, i) => {
+    const id = 'mp-' + Math.random().toString(36).slice(2, 8) + '-' + i;
+    const pf = c.platform ? `<span class="pf">${esc(c.platform)}</span>` : '';
+    const note = c.note ? `<div class="note">${esc(c.note)}</div>` : '';
+    return `<div class="cmd">${pf}<div style="flex:1"><pre id="${id}">${esc(c.cmd)}</pre>${note}</div>`
+      + `<button class="no-print" onclick="copyText(document.getElementById('${id}').innerText, this)">复制</button></div>`;
+  }).join('');
+  const basis = (a.basis || []).length
+    ? `<div class="pb-basis">依据：${(a.basis || []).map((b) => '<span class="tag">' + esc(b) + '</span>').join(' ')}</div>` : '';
+  const panels = (w.panels || []).map((p) => `<button class="chip-link" onclick="switchTab('${p[1]}')">👁 ${esc(p[0])}</button>`).join('');
+  const data = (w.data || []).length
+    ? `<div class="pb-data">${(w.data || []).map((x) => '<span class="data-chip">' + esc(x) + '</span>').join('')}</div>` : '';
+  const prio = a.priority_label ? `<span class="badge prio">${esc(a.priority_label)}</span>` : '';
+  const cat = (a.category && CAT_LABEL[a.category]) ? `<span class="tag cat">${esc(CAT_LABEL[a.category])}</span>` : '';
+  const miss = (a.missing_vars && a.missing_vars.length)
+    ? `<div class="pb-miss">⚠ ${a.missing_vars.map((x) => '&lt;' + esc(x) + '&gt;').join('、')} 需按现场情况替换后再执行</div>` : '';
+  return `<div class="pb-action">
+    <div class="pb-a-h">${prio}${cat}<span class="pb-a-t">${esc(a.title)}</span></div>
+    <div class="pb-a-d">${esc(a.detail || '')}</div>
+    ${cmds || '<div class="hint">（无具体命令，请按通用步骤处理）</div>'}
+    ${miss}${basis}
+    <div class="pb-watch">
+      <div class="pb-watch-h">👁 需要看什么</div>
+      <div class="pb-watch-b">${panels}${data}</div>
+      <div class="pb-watch-tip">${esc(w.tip || '')}</div>
+    </div>
+  </div>`;
+}
+
+function renderPlaybook() {
+  const root = $('#playbookRoot');
+  if (!root) return;
+  const d = state.current;
+  if (!d) {
+    root.innerHTML = '<div class="empty"><span class="big">📋</span>尚未运行分析。前往「分析中心」开始，'
+      + '或在「报告中心」载入历史结果后查看综合处置总剧本。</div>';
+    const pill = $('#pbPill'); if (pill) pill.style.display = 'none';
+    return;
+  }
+  const m = buildMaster(d);
+  const ctx = m.ctx;
+  const pill = $('#pbPill');
+  if (pill) { pill.style.display = 'inline-block'; pill.textContent = ctx.alertCount || 0; }
+
+  let html = summaryHeader(m) + iocSection(m.ioc);
+  html += '<div class="pb-steps">'
+    + MASTER_PHASES.map((p) => {
+        const cnt = m.phases.find((x) => x.key === p.key).actions.length;
+        const label = (p.title.split('·')[1] || p.title).trim();
+        return `<button class="pb-step ${cnt ? '' : 'empty'}" onclick="pbGoto('${p.key}')">`
+          + `<span class="n">${p.n}</span><span class="t">${esc(label)}</span>`
+          + (cnt ? `<span class="c">${cnt}</span>` : '') + '</button>';
+      }).join('<span class="pb-arrow">→</span>')
+    + '</div>';
+
+  m.phases.forEach((ph) => {
+    html += `<div class="pb-phase" id="pbs-${ph.key}">`
+      + `<div class="pb-phase-h"><span class="pb-n">${ph.n}</span><div>`
+      + `<div class="pb-pt">${esc(ph.title)}</div><div class="pb-pg">${esc(ph.goal)}</div></div></div>`;
+    html += ph.actions.length
+      ? ph.actions.map((a) => actionCard(a)).join('')
+      : '<div class="hint" style="margin:4px 0 8px">（本阶段无针对当前案件的处置动作）</div>';
+    html += '</div>';
+  });
+  root.innerHTML = html;
+}
+
+function downloadMasterHtml() {
+  const d = state.current;
+  if (!d) { toast('没有可导出的剧本', 'err'); return; }
+  const root = $('#playbookRoot');
+  const body = root ? root.innerHTML : '';
+  const html = '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">'
+    + '<title>应急响应处置总剧本 - ' + esc(d.run_id || '') + '</title><style>' + MASTER_PRINT_CSS + '</style></head>'
+    + '<body><div class="wrap"><header><h1>应急响应处置总剧本</h1>'
+    + '<div class="meta">案件编号: <b>' + esc(d.run_id || '') + '</b> · 生成时间: ' + esc(d.finished || '') + '</div></header>'
+    + body + '</div></body></html>';
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'IR-处置总剧本-' + (d.run_id || 'export') + '.html';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('已导出独立 HTML，可离线打开 / 收藏 / 打印', 'ok');
+}
+
+/* 导出用：自包含样式（浅色、可打印） */
+const MASTER_PRINT_CSS = `
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:#fff;color:#2c3e50;font-size:14px;line-height:1.6}
+.wrap{max-width:1180px;margin:0 auto;padding:24px}
+header{border-bottom:3px solid #2874a6;padding-bottom:10px;margin-bottom:16px}
+header h1{font-size:22px;color:#1a5276}
+.meta{font-size:13px;color:#7f8c8d;margin-top:6px}
+.pb-summary{display:flex;flex-wrap:wrap;gap:12px;margin:14px 0}
+.pb-succ{background:#eaf2f8;border:1px solid #cfe3f2;border-radius:8px;padding:8px 14px;min-width:150px}
+.pb-succ b{display:block;font-size:12px;color:#7f8c8d;margin-bottom:2px}
+.pb-succ span{font-size:14px;font-weight:700;color:#1a5276}
+.pb-succ.bad span{color:#c0392b}
+.pb-ioc{margin:14px 0}
+.pb-ioc h3{font-size:15px;margin-bottom:8px;color:#1a5276}
+.pb-steps{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:10px 0 18px}
+.pb-step{border:1px solid #dde3ea;background:#fff;border-radius:20px;padding:5px 12px;font-size:12px}
+.pb-step .n{background:#2874a6;color:#fff;border-radius:50%;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;margin-right:4px}
+.pb-step .c{background:#c0392b;color:#fff;border-radius:9px;padding:0 6px;font-size:11px;margin-left:4px}
+.pb-arrow{color:#7f8c8d}
+.pb-phase{margin:12px 0;page-break-inside:avoid}
+.pb-phase-h{display:flex;align-items:center;gap:12px;margin:14px 0 10px}
+.pb-n{background:#1a5276;color:#fff;width:30px;height:30px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font-weight:700;flex:0 0 auto}
+.pb-pt{font-size:15px;font-weight:700}
+.pb-pg{font-size:12px;color:#7f8c8d;margin-top:2px}
+.pb-action{background:#fff;border:1px solid #dde3ea;border-left:4px solid #2874a6;border-radius:8px;padding:14px 16px;margin-bottom:10px;page-break-inside:avoid}
+.pb-a-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.pb-a-t{font-size:14px;font-weight:700}
+.pb-a-d{font-size:13px;color:#41556b;margin-bottom:8px}
+.pb-action .cmd{display:flex;align-items:flex-start;gap:8px;background:#f7f9fa;border:1px solid #eef2f5;border-radius:6px;padding:8px 10px;margin:6px 0}
+.pb-action .cmd pre{margin:0;white-space:pre-wrap;word-break:break-all;flex:1;font-family:Consolas,"Courier New",monospace;font-size:12px;color:#23323f}
+.pb-action .cmd .pf{font-size:11px;background:#e8edf2;color:#52677a;border-radius:4px;padding:1px 6px;flex:0 0 auto}
+.pb-action .cmd .note{font-size:12px;color:#7b5e10;background:#fef9e7;border-left:3px solid #f1c40f;padding:4px 8px;margin-top:4px;border-radius:0 4px 4px 0}
+.pb-action .cmd button{display:none}
+.pb-basis{font-size:12px;color:#7f8c8d;margin:6px 0}
+.tag{display:inline-block;background:#eaf2f8;color:#1a5276;border:1px solid #cfe3f2;border-radius:4px;padding:1px 7px;font-size:11px;margin:2px 4px 2px 0}
+.tag.cat{background:#fdecea;color:#922b21;border-color:#f5b7b1}
+.badge.prio{background:#34495e;color:#fff;font-size:11px;border-radius:4px;padding:2px 7px}
+.pb-miss{font-size:12px;color:#b9770e;background:#fef9e7;border-left:3px solid #f39c12;padding:4px 8px;margin:4px 0;border-radius:0 4px 4px 0}
+.pb-watch{margin-top:10px;background:#f4f9ff;border:1px solid #d4e6f7;border-radius:8px;padding:10px 12px}
+.pb-watch-h{font-size:13px;font-weight:700;color:#1573b8;margin-bottom:6px}
+.pb-watch-b{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chip-link{border:1px solid #9cc3e6;background:#eaf2f8;color:#1a5276;border-radius:14px;padding:3px 10px;font-size:12px}
+.data-chip{background:#fff;border:1px solid #d4e6f7;color:#1a5276;border-radius:6px;padding:2px 8px;font-size:12px}
+.pb-watch-tip{font-size:12px;color:#52677a;margin-top:8px;line-height:1.6}
+.grid{border-collapse:collapse;width:100%;font-size:12px}
+.grid th,.grid td{border:1px solid #dde3ea;padding:6px 8px;text-align:left}
+.grid th{background:#eaf2f8;color:#1a5276}
+.badge.type{background:#e8edf2;color:#52677a;border-radius:4px;padding:1px 6px;font-size:11px}
+.hint{color:#7f8c8d;font-size:12px}
+@media print{.pb-phase{page-break-inside:avoid}.pb-action{page-break-inside:avoid}}
+`;
 
 /* ---------- 时间线 ---------- */
 function renderTimeline() {
@@ -1009,6 +1355,7 @@ function renderAll() {
   renderAlerts();
   renderTimeline();
   renderTypes();
+  renderPlaybook();
   $('#iocCountLabel').textContent = state.ioc.items.length;
 }
 
