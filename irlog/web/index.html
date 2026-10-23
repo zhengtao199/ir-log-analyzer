@@ -25,6 +25,8 @@
   <button class="tab" data-tab="timeline">📈 时间线</button>
   <button class="tab" data-tab="ioc">🎯 IOC 情报<span class="pill" id="iocPill" style="display:none"></span></button>
   <button class="tab" data-tab="reports">📄 报告中心</button>
+  <button class="tab" data-tab="types">🧩 类型分析<span class="pill" id="typePill" style="display:none"></span></button>
+  <button class="tab" data-tab="rules">📚 规则库</button>
   <button class="tab" data-tab="audit">🧾 审计日志</button>
 </nav>
 
@@ -198,6 +200,50 @@
         <tbody></tbody>
       </table>
     </div>
+  </div>
+</section>
+
+<!-- ============ 8. 类型分析 ============ -->
+<section class="panel" id="tab-types">
+  <div class="card">
+    <h2>🧩 类型分析结论 <span class="sub">每类日志分别回答各自的应急问题</span></h2>
+    <div id="typeReports"></div>
+  </div>
+  <div class="card">
+    <h2>🌐 跨类型综合关联视图</h2>
+    <div id="correlationView"></div>
+  </div>
+</section>
+
+<!-- ============ 9. 规则库 ============ -->
+<section class="panel" id="tab-rules">
+  <div class="card">
+    <h2>📚 规则库 <span class="sub">查看内置规则 payload · 给自己环境的特征追加 / 新建规则分类 · 导入导出</span></h2>
+    <div class="row">
+      <button onclick="refreshRules()">🔄 刷新</button>
+      <button onclick="openRuleEditor(null)">➕ 新建规则</button>
+      <button class="ghost" onclick="exportRules()">⬇ 导出规则包</button>
+      <button class="ghost" onclick="document.getElementById('importFile').click()">⬆ 导入规则包</button>
+      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importRulesFile(this)">
+      <span class="spacer"></span>
+      <span class="hint" id="ruleMeta"></span>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label class="field" style="flex:1;min-width:220px">搜索
+        <input type="text" id="ruleSearch" oninput="renderRules()" placeholder="规则 ID / 名称 / 特征内容">
+      </label>
+    </div>
+    <div style="overflow-x:auto;margin-top:10px">
+      <table class="grid" id="ruleTable">
+        <thead><tr><th>规则 ID</th><th>名称</th><th>级别</th><th>归属</th><th>匹配范围</th><th>特征数</th><th>状态</th><th style="width:160px">操作</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🔍 内置规则 payload 清单 <span class="sub">与检测器源码同源（只读参考）</span></h2>
+    <div id="builtinRules"></div>
   </div>
 </section>
 

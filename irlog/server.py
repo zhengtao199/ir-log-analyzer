@@ -34,6 +34,9 @@ from .parsers import detect_parser
 from .report_html import write_html_report
 from .report_json import write_json_report
 from .report_playbook import write_playbook_html
+from .rulepack import (RulePack, CustomRule, Pattern, builtin_inventory,
+                       export_pack, parse_pack, backup_file)
+from .detectors.custom import test_rule_against_text
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 MAX_UPLOAD = 2 << 30  # 2GB
@@ -181,6 +184,8 @@ class Handler(BaseHTTPRequestHandler):
                 if t.status == "error":
                     payload["error"] = t.error
                 self._send_json(payload)
+            elif path.startswith("/api/rulepack"):
+                self._api_rulepack_get(path)
             elif path.startswith("/api/report/"):
                 self._api_report(path.rsplit("/", 1)[-1])
             else:
@@ -200,6 +205,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_analyze(self._read_body(length))
             elif path == "/api/ioc":
                 self._api_ioc(self._read_body(length))
+            elif path == "/api/rulepack":
+                self._api_rulepack_post(self._read_body(length))
+            elif path == "/api/rulepack/import":
+                self._api_rulepack_import(self._read_body(length))
+            elif path == "/api/rulepack/test":
+                self._api_rulepack_test(self._read_body(length))
             else:
                 self._send_json({"error": "not found"}, 404)
         except BrokenPipeError:
@@ -215,6 +226,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_file_delete(parsed.query)
             elif path == "/api/ioc":
                 self._api_ioc({"action": "clear"})
+            elif path == "/api/rulepack":
+                self._api_rulepack_delete(parsed.query)
             else:
                 self._send_json({"error": "not found"}, 404)
         except Exception as exc:  # noqa: BLE001
@@ -397,8 +410,10 @@ class Handler(BaseHTTPRequestHandler):
             evidence = EvidenceSet()
             for p in task.paths:
                 evidence.add_file(p)
+            pack = RulePack.load(self.state.workdir)
             result = run_analysis(task.paths, cfg, self.state.ioc_store,
-                                  progress=lambda msg, frac: self._update(task, msg, frac))
+                                  progress=lambda msg, frac: self._update(task, msg, frac),
+                                  rulepack=pack, workdir=self.state.workdir)
             custody = chain_of_custody(result.run_id, operator, evidence,
                                        result.started, result.finished, __version__)
             prefix = os.path.join(self.state.workdir, result.run_id)
@@ -469,6 +484,125 @@ class Handler(BaseHTTPRequestHandler):
         ctype = ("text/html; charset=utf-8" if fmt in ("html", "playbook")
                  else "application/json")
         self._send_file(path, ctype)
+
+    # ---- 规则库管理 ----
+    def _rulepack(self) -> RulePack:
+        return RulePack.load(self.state.workdir)
+
+    def _api_rulepack_get(self, path: str) -> None:
+        if path == "/api/rulepack/export":
+            pack = self._rulepack()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Disposition",
+                             'attachment; filename="irlog-rules-pack.json"')
+            data = export_pack(pack)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            self.state.audit.record(self.client_address[0], "rulepack-export")
+            return
+        pack = self._rulepack()
+        custom = [r.to_dict() for r in pack.rules.values()]
+        self._send_json({
+            "version": __version__,
+            "updated": pack.to_dict().get("updated_human"),
+            "disabled_builtin": pack.disabled_builtin,
+            "builtin": builtin_inventory(),
+            "custom": custom,
+            "custom_count": len(pack.custom_rules()),
+            "attachment_count": sum(1 for r in pack.rules.values() if r.attaches_to),
+            "rule_file": RulePack.path_of(self.state.workdir),
+        })
+
+    def _build_rule(self, body: dict) -> tuple[CustomRule, list]:
+        rid = (body.get("rule_id") or "").strip()
+        try:
+            severity = int(body.get("severity", 3))
+        except (TypeError, ValueError):
+            severity = 3
+        rule = CustomRule(
+            rule_id=rid,
+            title=(body.get("title") or "").strip(),
+            severity=severity,
+            description=(body.get("description") or "").strip(),
+            mitre=(body.get("mitre") or "").strip(),
+            recommendation=(body.get("recommendation") or "").strip(),
+            scope=(body.get("scope") or "all").strip(),
+            attaches_to=(body.get("attaches_to") or "").strip() or None,
+            enabled=bool(body.get("enabled", True)),
+        )
+        for i, p in enumerate(body.get("patterns") or []):
+            rule.patterns.append(Pattern(
+                id=(p.get("id") or f"p{i+1}").strip(),
+                kind=(p.get("kind") or "keyword").strip(),
+                value=(p.get("value") or "").strip(),
+                note=(p.get("note") or "").strip(),
+                enabled=bool(p.get("enabled", True)),
+            ))
+        errs = rule.validate()
+        return rule, errs
+
+    def _api_rulepack_post(self, body: dict) -> None:
+        rule, errs = self._build_rule(body)
+        if errs:
+            self._send_json({"error": "；".join(errs)}, 400)
+            return
+        pack = self._rulepack()
+        is_new = rule.rule_id not in pack.rules
+        pack.upsert(rule)
+        pack.save(self.state.workdir)
+        self.state.audit.record(self.client_address[0], "rulepack-upsert",
+                                rule_id=rule.rule_id, is_new=is_new,
+                                attaches_to=rule.attaches_to)
+        self._send_json({"ok": True, "is_new": is_new, "rule_id": rule.rule_id,
+                         "rule": rule.to_dict()})
+
+    def _api_rulepack_delete(self, query: str) -> None:
+        rid = (parse_qs(query).get("id") or [""])[0].strip()
+        if not rid:
+            self._send_json({"error": "缺少参数 id"}, 400)
+            return
+        pack = self._rulepack()
+        if pack.remove(rid):
+            pack.save(self.state.workdir)
+            self.state.audit.record(self.client_address[0], "rulepack-delete", rule_id=rid)
+            self._send_json({"deleted": rid})
+        else:
+            self._send_json({"error": "规则不存在"}, 404)
+
+    def _api_rulepack_import(self, body: dict) -> None:
+        mode = (body.get("mode") or "merge").strip()
+        content = body.get("content") or ""
+        if isinstance(content, (list, dict)):
+            import json as _json
+            content = _json.dumps(content)
+        pack, err = parse_pack(content.encode("utf-8"))
+        if err:
+            self._send_json({"error": err}, 400)
+            return
+        cur = self._rulepack()
+        if mode == "replace":
+            # 替换前先备份现库
+            backup_file(RulePack.path_of(self.state.workdir))
+            cur.replace_with(pack)
+        else:
+            cur.merge(pack)
+        cur.save(self.state.workdir)
+        self.state.audit.record(self.client_address[0], "rulepack-import",
+                                mode=mode, rules=len(pack.rules))
+        self._send_json({"ok": True, "mode": mode, "rules": len(pack.rules),
+                         "total": len(cur.rules)})
+
+    def _api_rulepack_test(self, body: dict) -> None:
+        text = body.get("text") or ""
+        rule, errs = self._build_rule(body.get("rule") or {})
+        if errs:
+            self._send_json({"error": "；".join(errs)}, 400)
+            return
+        res = test_rule_against_text(rule, text)
+        matched = any(r.get("ok") for r in res)
+        self._send_json({"matched": matched, "results": res})
 
 
 def run_server(host: str = "127.0.0.1", port: int = 8611,

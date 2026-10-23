@@ -17,6 +17,7 @@ import re
 from urllib.parse import unquote_plus
 
 from ..models import A_PROCESS_CREATE, A_HTTP_REQUEST, Event
+from ..stats import WRITABLE_DIRS_RE, param_count, PARAM_FUZZ_MIN
 from .base import Detector
 
 UPLOAD_DIRS_RE = re.compile(
@@ -67,17 +68,29 @@ class WebshellDetector(Detector):
         ulow = uri.lower()
         path = ulow.split("?", 1)[0]
         ext = path.rsplit(".", 1)[-1] if "." in path.rsplit("/", 1)[-1] else ""
-        in_upload_dir = bool(UPLOAD_DIRS_RE.search(low))
+        # 可写目录（上传目录 / 插件目录 / 缓存目录）：webshell 的典型落地位置
+        in_writable_dir = bool(WRITABLE_DIRS_RE.search(path))
         suspicious_ext = ext in self.config.webshell_suspicious_exts
         post = (ev.method or "").upper() == "POST"
+        status = ev.status
+        # 只有「服务端真的处理了」才算 webshell 交互：404/403/500 说明文件不存在
+        # 或无权限，那只是扫描探测（归 web-attack 管），不能算 webshell 命中。
+        # status 为 None（部分来源不记录状态码）时按未知放行。
+        served = status is None or (200 <= status < 400)
+        # 参数 fuzzing 识别：URI 里堆了大量参数名（扫描器行为）时，
+        # 其中的 code=/cmd= 之类不能算 webshell 证据 —— 否则一次参数穷举
+        # 就能把任意正常页面误报成一句话木马
+        fuzzing = param_count(uri) >= PARAM_FUZZ_MIN
         reasons = []
-        if suspicious_ext and in_upload_dir:
-            reasons.append(f"上传目录中的脚本文件（{ext}）")
-        if suspicious_ext and post:
-            reasons.append(f"POST 提交到 {ext} 脚本（疑似木马交互）")
-        if SUSPICIOUS_PARAMS.search(low) or SUSPICIOUS_PARAMS.search(dec):
+        if suspicious_ext and in_writable_dir and served:
+            reasons.append(f"可写目录中的脚本文件（{ext}）")
+        if suspicious_ext and post and served and (
+                SUSPICIOUS_PARAMS.search(low) or SUSPICIOUS_PARAMS.search(dec)
+                or SHELL_TOKENS.search(low) or SHELL_TOKENS.search(dec)):
+            reasons.append(f"POST 到 {ext} 脚本且含命令执行特征")
+        if not fuzzing and served and (SUSPICIOUS_PARAMS.search(low) or SUSPICIOUS_PARAMS.search(dec)):
             reasons.append("URI 含命令执行类参数")
-        if SHELL_TOKENS.search(low) or SHELL_TOKENS.search(dec):
+        if served and (SHELL_TOKENS.search(low) or SHELL_TOKENS.search(dec)):
             reasons.append("URI 含系统命令特征" if not body else "请求体含系统命令特征")
         if not reasons:
             return

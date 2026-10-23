@@ -59,6 +59,8 @@ function switchTab(name) {
   if (name === 'ioc') refreshIOC();
   if (name === 'timeline') renderTimeline();
   if (name === 'alerts') renderAlerts();
+  if (name === 'types') renderTypes();
+  if (name === 'rules') refreshRules();
 }
 
 /* ---------- 证据管理 ---------- */
@@ -506,6 +508,92 @@ function renderTypeBreakdown() {
     </div>`).join('');
 }
 
+/* ---------- 类型分析 ---------- */
+function renderTypes() {
+  const d = state.current;
+  const box = $('#typeReports');
+  const corrBox = $('#correlationView');
+  if (!d) {
+    box.innerHTML = '<div class="empty"><span class="big">🧩</span>尚未运行分析。前往「分析中心」开始，或在「报告中心」载入历史结果。</div>';
+    corrBox.innerHTML = '';
+    $('#typePill').style.display = 'none';
+    return;
+  }
+  const reports = d.type_reports || [];
+  $('#typePill').style.display = reports.length ? 'inline-block' : 'none';
+  $('#typePill').textContent = reports.length;
+  box.innerHTML = reports.length ? reports.map(typeReportCard).join('')
+    : '<div class="hint">未识别到已知类型的日志（仅有通用日志）。</div>';
+  renderCorrelation(d.correlation || {});
+}
+
+function typeReportCard(r) {
+  const kpis = (r.kpis || []).map((k) => `
+    <div class="kpi ${k.tone === 'bad' ? 'bad' : k.tone === 'warn' ? 'warn' : k.tone === 'good' ? 'good' : ''}">
+      <b>${fmtNum(k.value)}</b><span>${esc(k.label)}</span></div>`).join('');
+  const concl = (r.conclusions || []).map((c) => `<div class="concl">${esc(c)}</div>`).join('');
+  const hint = r.export_hint ? `<div class="export-hint">📌 此类日志取证导出方式：\n${esc(r.export_hint)}</div>` : '';
+  return `<div class="type-card" style="border-left-color:${esc(r.color)}">
+    <div class="tc-head">
+      <span class="tc-name">${esc(r.name)}</span>
+      <span class="tc-tag" style="background:${esc(r.color)}">${esc(r.short)}</span>
+      <span class="tc-q">${esc(r.question)}</span>
+      <span class="tc-q">告警 ${r.alert_count} 条 · 事件 ${fmtNum(r.events)}</span>
+    </div>
+    <div class="kpi-row">${kpis || '<span class="hint">（无统计）</span>'}</div>
+    ${concl || '<div class="hint">（未生成结论）</div>'}
+    ${hint}
+  </div>`;
+}
+
+function renderCorrelation(corr) {
+  const box = $('#correlationView');
+  if (!corr || !Object.keys(corr).length) { box.innerHTML = '<div class="hint">无关联数据。</div>'; return; }
+  let s = '';
+  const concls = corr.conclusions || [];
+  if (concls.length) {
+    s += '<div style="margin-bottom:6px"><b>关联结论</b></div>';
+    s += concls.map((c) => `<div class="corr-item"><span class="corr-lvl ${esc(c.level)}">${esc((c.level || '').toUpperCase())}</span>${esc(c.text)}</div>`).join('');
+  }
+  const ips = corr.ip_profiles || [];
+  if (ips.length) {
+    s += '<div style="margin:12px 0 6px"><b>统一攻击者 IP 画像</b></div>';
+    s += `<table class="grid"><thead><tr><th>IP</th><th>风险</th><th>涉及类型</th><th>Web攻击</th><th>Win失败/成功</th><th>Linux失败/成功</th><th>DB风险</th><th>活跃时段</th></tr></thead><tbody>`
+       + ips.map((p) => `<tr><td class="mono">${esc(p.ip)}</td>
+          <td><span class="badge sev${p.risk === 'critical' ? 1 : p.risk === 'high' ? 2 : p.risk === 'medium' ? 3 : 4}">${esc(p.risk)}</span></td>
+          <td>${esc((p.types || []).join('/'))}</td>
+          <td>${fmtNum(p.web_attacks)}</td>
+          <td>${fmtNum(p.win_fail)}/${fmtNum(p.win_ok)}</td>
+          <td>${fmtNum(p.linux_fail)}/${fmtNum(p.linux_ok)}</td>
+          <td>${fmtNum(p.db_risky)}</td>
+          <td class="mono nowrap">${esc(p.first || '-')} ~ ${esc(p.last || '-')}</td></tr>`).join('')
+       + '</tbody></table>';
+  }
+  const iocs = corr.iocs || {};
+  const iocParts = [];
+  if ((iocs.attack_ips || []).length) iocParts.push(iocBlock('攻击来源 IP', iocs.attack_ips));
+  if ((iocs.target_accounts || []).length) iocParts.push(iocBlock('目标账号', iocs.target_accounts));
+  if ((iocs.sensitive_paths || []).length) iocParts.push(iocBlock('敏感路径 / webshell', iocs.sensitive_paths));
+  if ((iocs.risky_sql || []).length) iocParts.push(iocBlock('可疑 SQL 片段', iocs.risky_sql));
+  if ((iocs.suspicious_commands || []).length) iocParts.push(iocBlock('可疑命令', iocs.suspicious_commands));
+  if (iocParts.length) s += `<div style="margin:12px 0 6px"><b>全局 IOC 情报清单</b></div>` + iocParts.join('');
+  const tl = corr.timeline || [];
+  if (tl.length) {
+    s += `<div style="margin:12px 0 6px"><b>跨源告警时间线（按时间）</b></div>`;
+    s += `<table class="grid"><thead><tr><th>时间</th><th>来源IP</th><th>级别</th><th>规则</th><th>标题</th></tr></thead><tbody>`
+       + tl.map((a) => `<tr><td class="mono nowrap">${esc(a.time || '-')}</td><td class="mono">${esc(a.ip || '')}</td>
+          <td><span class="badge sev${a.severity}">${esc(a.severity_label || a.severity)}</span></td>
+          <td>${esc(a.rule || '')}</td><td>${esc(a.title || '')}</td></tr>`).join('')
+       + '</tbody></table>';
+  }
+  box.innerHTML = s || '<div class="hint">无关联数据。</div>';
+}
+
+function iocBlock(title, arr) {
+  if (!arr || !arr.length) return '';
+  return `<div><b>${esc(title)}（${arr.length}）</b><div class="ioc-box">${esc(arr.join('\n'))}</div></div>`;
+}
+
 /* ---------- IOC 情报 ---------- */
 async function refreshIOC() {
   try {
@@ -567,6 +655,219 @@ async function loadIOCFile() {
     toast(`已从 ${f} 载入 ${r.loaded} 条`, 'ok');
     await refreshIOC();
   } catch (e) { toast('载入失败: ' + e.message, 'err'); }
+}
+
+/* ---------- 规则库 ---------- */
+const RULE_STATE = { data: null, builtin: [] };
+
+async function refreshRules() {
+  try {
+    const r = await api('/api/rulepack');
+    RULE_STATE.data = r;
+    RULE_STATE.builtin = r.builtin || [];
+    $('#ruleMeta').textContent =
+      `自定义规则 ${r.custom_count || 0} 条 · 附加特征 ${r.attachment_count || 0} 条`
+      + (r.updated ? ` · 更新于 ${r.updated}` : '');
+    renderRules();
+    renderBuiltin();
+  } catch (e) { toast('获取规则库失败: ' + e.message, 'err'); }
+}
+
+function renderRules() {
+  const r = RULE_STATE.data;
+  const tb = $('#ruleTable tbody');
+  if (!r) { tb.innerHTML = '<tr><td colspan="8" class="hint">加载中…</td></tr>'; return; }
+  const q = ($('#ruleSearch').value || '').trim().toLowerCase();
+  const items = (r.custom || []).filter((c) => {
+    if (!q) return true;
+    const hay = (c.rule_id + ' ' + c.title + ' ' + (c.attaches_to || '') + ' '
+      + (c.patterns || []).map((p) => p.value).join(' ')).toLowerCase();
+    return hay.includes(q);
+  });
+  if (!items.length) {
+    tb.innerHTML = '<tr><td colspan="8" class="empty"><span class="big">📚</span>暂无自定义规则。点击「新建规则」给自己环境追加特征，或给内置规则加 payload。</td></tr>';
+    return;
+  }
+  tb.innerHTML = items.map((c) => {
+    const attached = c.attaches_to ? `→ ${esc(c.attaches_to)}` : '独立分类';
+    const sevl = c.severity;
+    return `<tr>
+      <td class="mono">${esc(c.rule_id)}</td>
+      <td>${esc(c.title)}</td>
+      <td><span class="badge sev${sevl}">${esc(SEV[sevl] || sevl)}</span></td>
+      <td>${esc(attached)}</td>
+      <td>${esc(c.scope || 'all')}</td>
+      <td>${(c.patterns || []).length}</td>
+      <td>${c.enabled ? '<span style="color:#27ae60">启用</span>' : '<span style="color:#b9770e">停用</span>'}</td>
+      <td class="actions">
+        <button class="small" onclick="openRuleEditor('${esc(c.rule_id)}')">编辑</button>
+        <button class="small danger" onclick="deleteRule('${esc(c.rule_id)}')">删除</button>
+      </td></tr>`;
+  }).join('');
+}
+
+function renderBuiltin() {
+  const box = $('#builtinRules');
+  const list = RULE_STATE.builtin || [];
+  if (!list.length) { box.innerHTML = '<div class="hint">（无）</div>'; return; }
+  box.innerHTML = list.map((b) => {
+    const pats = (b.patterns || []).map((p) =>
+      `<tr><td class="mono">${(p.kind === 'regex' ? '正则' : '关键字')}</td>
+        <td class="mono" style="word-break:break-all">${esc(p.value)}</td>
+        <td class="hint">${esc(p.note || '')}</td></tr>`).join('');
+    return `<details><summary><b>${esc(b.title)}</b> <span class="mono">(${esc(b.rule_id)})</span>`
+      + `${b.mitre ? ` · <span class="tag-mitre">${esc(b.mitre)}</span>` : ''}</summary>
+      <div style="margin:6px 0" class="hint">${esc(b.description || '')}</div>
+      ${pats ? `<table class="grid"><thead><tr><th>类型</th><th>特征</th><th>说明</th></tr></thead><tbody>${pats}</tbody></table>` : ''}
+      <div style="margin-top:6px">
+        <button class="small" onclick="attachToBuiltin('${esc(b.rule_id)}','${esc(b.title)}')">＋ 给这条规则加 payload</button>
+      </div>
+    </details>`;
+  }).join('');
+}
+
+function attachToBuiltin(id, title) {
+  openRuleEditor(null, { attaches_to: id, title: '自定义 ' + title + ' payload', scope: 'all' });
+}
+
+function openRuleEditor(id, preset) {
+  const data = RULE_STATE.data || { custom: [] };
+  const rule = (data.custom || []).find((c) => c.rule_id === id) || (preset || {});
+  const isEdit = !!id;
+  const builtinIds = (RULE_STATE.builtin || []).map((b) => b.rule_id);
+  const pats = (rule.patterns || []).map((p) => patRow(p)).join('');
+  const builtinOpts = '<option value="">（独立的新规则分类）</option>'
+    + builtinIds.map((b) => `<option value="${esc(b)}" ${rule.attaches_to === b ? 'selected' : ''}>${esc(b)}</option>`).join('');
+  const sevOpts = [1, 2, 3, 4].map((s) =>
+    `<option value="${s}" ${Number(rule.severity) === s ? 'selected' : ''}>${SEV[s]}（${s}）</option>`).join('');
+  const scopeOpts = [['all', '全部字段'], ['uri', 'Web URI'], ['body', 'HTTP 请求体'],
+    ['process', '进程/命令行'], ['raw', '原始日志行'], ['fields', '结构化字段']]
+    .map(([v, l]) => `<option value="${v}" ${rule.scope === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  const body = `<form id="ruleForm" class="rule-form">
+    <input type="hidden" id="rf_id_old" value="${esc(id || '')}">
+    <label class="field">规则 ID（小写字母/数字/连字符，2-49 字符）
+      <input id="rf_ruleid" value="${esc(rule.rule_id || '')}" ${isEdit ? 'readonly style="background:#f0f3f5"' : ''} placeholder="my-custom-rule"></label>
+    <label class="field">规则名称 <input id="rf_title" value="${esc(rule.title || '')}" placeholder="如：某业务后台路径"></label>
+    <label class="field">严重度 <select id="rf_sev">${sevOpts}</select></label>
+    <label class="field">归属内置规则（留空=独立分类）
+      <select id="rf_attach">${builtinOpts}</select></label>
+    <label class="field">匹配范围 <select id="rf_scope">${scopeOpts}</select></label>
+    <label class="field" style="flex:1;min-width:260px">描述
+      <textarea id="rf_desc" rows="2" placeholder="这条规则想抓什么">${esc(rule.description || '')}</textarea></label>
+    <label class="field">MITRE ATT&CK <input id="rf_mitre" value="${esc(rule.mitre || '')}" placeholder="如 T1190"></label>
+    <label class="field" style="flex:1;min-width:260px">处置建议
+      <textarea id="rf_rec" rows="2">${esc(rule.recommendation || '')}</textarea></label>
+    <label class="field" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rf_enabled" ${rule.enabled !== false ? 'checked' : ''}> 启用此规则</label>
+    <div style="flex-basis:100%"><b>匹配特征</b>
+      <div id="patList">${pats || patRow({})}</div>
+      <button type="button" class="ghost small" onclick="addPatRow()">＋ 添加特征</button>
+    </div>
+    <div style="flex-basis:100%" class="row">
+      <button type="button" onclick="testRule()">🔍 试测特征</button>
+      <span id="rfTest" class="hint"></span>
+      <span class="spacer"></span>
+      <button type="button" class="ghost" onclick="closeModal()">取消</button>
+      <button type="button" onclick="saveRule()">💾 保存</button>
+    </div>
+  </form>`;
+  openModal(isEdit ? '编辑规则 · ' + id : '新建规则', body);
+}
+
+function patRow(p) {
+  p = p || {};
+  return `<div class="pat-row">
+    <select class="pat-kind">
+      <option value="keyword" ${p.kind === 'keyword' ? 'selected' : ''}>关键字</option>
+      <option value="regex" ${p.kind === 'regex' ? 'selected' : ''}>正则</option>
+    </select>
+    <input class="pat-val" placeholder="特征内容" value="${esc(p.value || '')}">
+    <input class="pat-note" placeholder="说明（可选）" value="${esc(p.note || '')}">
+    <button type="button" class="small danger" onclick="this.closest('.pat-row').remove()">✕</button>
+  </div>`;
+}
+function addPatRow() { $('#patList').insertAdjacentHTML('beforeend', patRow({})); }
+
+function collectRuleForm() {
+  const oldId = $('#rf_id_old').value;
+  const rule_id = ($('#rf_ruleid').value || '').trim();
+  const patterns = [...document.querySelectorAll('#patList .pat-row')].map((row, i) => ({
+    id: 'p' + (i + 1),
+    kind: row.querySelector('.pat-kind').value,
+    value: row.querySelector('.pat-val').value,
+    note: row.querySelector('.pat-note').value,
+    enabled: true,
+  })).filter((p) => p.value.trim());
+  return {
+    _old_id: oldId,
+    rule_id,
+    title: ($('#rf_title').value || '').trim(),
+    severity: Number($('#rf_sev').value),
+    attaches_to: ($('#rf_attach').value || '').trim(),
+    scope: $('#rf_scope').value,
+    description: ($('#rf_desc').value || '').trim(),
+    mitre: ($('#rf_mitre').value || '').trim(),
+    recommendation: ($('#rf_rec').value || '').trim(),
+    enabled: $('#rf_enabled').checked,
+    patterns,
+  };
+}
+
+async function saveRule() {
+  const body = collectRuleForm();
+  try {
+    const r = await api('/api/rulepack', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    toast('已保存规则 ' + r.rule_id, 'ok');
+    closeModal();
+    await refreshRules();
+  } catch (e) { toast('保存失败: ' + e.message, 'err'); }
+}
+
+async function deleteRule(id) {
+  if (!confirm('确认删除规则「' + id + '」？此操作会记入审计日志。')) return;
+  try {
+    const r = await api('/api/rulepack?name=' + encodeURIComponent(id), { method: 'DELETE' });
+    toast('已删除 ' + r.deleted, 'ok');
+    await refreshRules();
+  } catch (e) { toast('删除失败: ' + e.message, 'err'); }
+}
+
+async function testRule() {
+  const rule = collectRuleForm();
+  const text = prompt('粘贴一段要试测的原始日志文本：');
+  if (text == null) return;
+  try {
+    const r = await api('/api/rulepack/test', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rule, text }),
+    });
+    $('#rfTest').textContent = r.matched
+      ? '✅ 命中：' + (r.results.find((x) => x.ok)?.match || '')
+      : '❌ 未命中任何特征';
+    $('#rfTest').style.color = r.matched ? '#27ae60' : '#b9770e';
+  } catch (e) { toast('试测失败: ' + e.message, 'err'); }
+}
+
+function exportRules() {
+  window.open('/api/rulepack/export', '_blank');
+}
+
+async function importRulesFile(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  const text = await f.text();
+  const mode = confirm('选择导入方式：\n确定 = 合并（同 ID 覆盖，新 ID 追加）\n取消 = 整体替换（先备份现有规则库）')
+    ? 'merge' : 'replace';
+  try {
+    const r = await api('/api/rulepack/import', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode, content: text }),
+    });
+    toast(`已导入 ${r.rules} 条规则（共 ${r.total} 条）`, 'ok');
+    await refreshRules();
+  } catch (e) { toast('导入失败: ' + e.message, 'err'); }
+  input.value = '';
 }
 
 /* ---------- 报告中心 ---------- */
@@ -646,6 +947,7 @@ function renderAll() {
   renderSummary();
   renderAlerts();
   renderTimeline();
+  renderTypes();
   $('#iocCountLabel').textContent = state.ioc.items.length;
 }
 

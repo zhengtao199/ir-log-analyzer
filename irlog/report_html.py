@@ -63,6 +63,33 @@ details .body { padding: 12px 16px; }
 footer { text-align: center; color: #95a5a6; font-size: 12px; padding: 18px; }
 .mono { font-family: Consolas, monospace; font-size: 12px; }
 .hash { max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+/* ---- 类型分析结论 ---- */
+.type-card { border-left: 5px solid #2874a6; margin-bottom: 16px; }
+.type-card .tc-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.type-card .tc-name { font-size: 16px; font-weight: 700; }
+.type-card .tc-q { font-size: 12px; color: #7f8c8d; background: #f0f3f5; border-radius: 4px; padding: 2px 8px; }
+.type-card .tc-tag { font-size: 12px; color: #fff; border-radius: 4px; padding: 1px 8px; }
+.kpi-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 12px; }
+.kpi { background: #f7f9fa; border-radius: 8px; padding: 8px 14px; min-width: 110px; }
+.kpi .kv-num { font-size: 20px; font-weight: 700; }
+.kpi .kv-lbl { font-size: 11px; color: #7f8c8d; }
+.kpi.bad { background: #fdecea; } .kpi.bad .kv-num { color: #c0392b; }
+.kpi.warn { background: #fef5e7; } .kpi.warn .kv-num { color: #e67e22; }
+.kpi.good { background: #eafaf1; } .kpi.good .kv-num { color: #27ae60; }
+.concl { font-size: 13px; margin: 4px 0; padding-left: 14px; position: relative; }
+.concl::before { content: "\\2022"; position: absolute; left: 0; color: #2874a6; }
+.export-hint { background: #fbfcfd; border: 1px dashed #d5dbdb; border-radius: 6px;
+               padding: 8px 12px; margin-top: 8px; font-size: 12px; color: #566573; white-space: pre-wrap; }
+/* ---- 跨类型关联 ---- */
+.corr-lvl { display: inline-block; font-size: 12px; color: #fff; border-radius: 4px;
+            padding: 1px 8px; margin-right: 8px; }
+.corr-lvl.critical { background: #c0392b; } .corr-lvl.high { background: #e67e22; }
+.corr-lvl.medium { background: #2980b9; } .corr-lvl.info { background: #7f8c8d; }
+.corr-item { background: #fbfcfd; border: 1px solid #edf1f4; border-radius: 6px;
+             padding: 8px 12px; margin: 6px 0; font-size: 13px; }
+.ioc-box { font-family: Consolas, monospace; font-size: 12px; background: #fbfcfd;
+           border: 1px solid #edf1f4; border-radius: 6px; padding: 8px 10px; margin: 6px 0;
+           white-space: pre-wrap; word-break: break-all; max-height: 180px; overflow: auto; }
 /* ---- 处置剧本 ---- */
 .pb { margin-top: 12px; border: 1px solid #d6eaf8; border-radius: 8px; overflow: hidden; }
 .pb-h { background: #ebf5fb; padding: 8px 14px; font-size: 13px; font-weight: 600;
@@ -155,6 +182,111 @@ def _playbook_html(pb: dict, idx: int) -> str:
         parts.append('</div>')
     parts.append('</div>')
     return "".join(parts)
+
+
+def _type_reports_html(d: dict) -> str:
+    """渲染「每类日志回答各自的应急问题」面板。"""
+    reports = d.get("type_reports") or []
+    if not reports:
+        return ""
+    parts = ['<div class="card"><h2>二、类型分析结论（按日志类型分别回答应急问题）</h2>']
+    for r in reports:
+        kpis = "".join(
+            f'<div class="kpi {esc(k.get("tone", "normal"))}">'
+            f'<div class="kv-num">{esc(k.get("value", 0))}</div>'
+            f'<div class="kv-lbl">{esc(k.get("label", ""))}</div></div>'
+            for k in (r.get("kpis") or [])
+        )
+        concl = "".join(f'<div class="concl">{esc(c)}</div>' for c in (r.get("conclusions") or []))
+        hint = r.get("export_hint")
+        if hint:
+            hint_html = ('<div class="export-hint">📌 此类日志取证导出方式：<br>'
+                         + esc(hint) + '</div>')
+        else:
+            hint_html = ""
+        parts.append(f"""
+<div class="type-card" style="border-left-color:{esc(r.get('color', '#2874a6'))}">
+  <div class="tc-head">
+    <span class="tc-name">{esc(r.get('name', ''))}</span>
+    <span class="tc-tag" style="background:{esc(r.get('color', '#2874a6'))}">{esc(r.get('short', ''))}</span>
+    <span class="tc-q">{esc(r.get('question', ''))}</span>
+    <span class="tc-q">告警 {esc(r.get('alert_count', 0))} 条 · 事件 {esc(r.get('events', 0))}</span>
+  </div>
+  <div class="kpi-row">{kpis or '<span class="hint">（无统计）</span>'}</div>
+  {concl or '<div class="hint">（未生成结论）</div>'}
+  {hint_html}
+</div>""")
+    parts.append('</div>')
+    return "".join(parts)
+
+
+def _correlation_html(d: dict) -> str:
+    """渲染跨类型综合关联视图。"""
+    corr = d.get("correlation") or {}
+    if not corr:
+        return ""
+    parts = ['<div class="card"><h2>三、跨类型综合关联视图</h2>']
+    # 关联结论
+    concls = corr.get("conclusions") or []
+    if concls:
+        parts.append('<div style="margin-bottom:10px"><b>关联结论</b></div>')
+        for c in concls:
+            lv = esc(c.get("level", "info"))
+            parts.append(f'<div class="corr-item"><span class="corr-lvl {lv}">{esc(lv.upper())}</span>'
+                         f'{esc(c.get("text", ""))}</div>')
+    # 攻击者画像
+    ips = corr.get("ip_profiles") or []
+    if ips:
+        parts.append('<div style="margin:12px 0 6px"><b>统一攻击者 IP 画像</b></div>')
+        rows = "".join(
+            f"<tr><td class='mono'>{esc(p['ip'])}</td>"
+            f"<td><span class='badge' style='background:{_risk_color(p.get('risk'))}'>{esc(p.get('risk',''))}</span></td>"
+            f"<td>{esc('/'.join(p.get('types', [])))}</td>"
+            f"<td>{esc(p.get('web_attacks', 0))}</td><td>{esc(p.get('win_fail', 0))}/{esc(p.get('win_ok', 0))}</td>"
+            f"<td>{esc(p.get('linux_fail', 0))}/{esc(p.get('linux_ok', 0))}</td>"
+            f"<td>{esc(p.get('db_risky', 0))}</td>"
+            f"<td class='mono'>{esc(p.get('first') or '-')} ~ {esc(p.get('last') or '-')}</td></tr>"
+            for p in ips
+        )
+        parts.append(f"<table><tr><th>IP</th><th>风险</th><th>涉及类型</th><th>Web攻击</th>"
+                     f"<th>Win失败/成功</th><th>Linux失败/成功</th><th>DB风险</th><th>活跃时段</th></tr>"
+                     f"{rows}</table>")
+    # 全局 IOC
+    iocs = corr.get("iocs") or {}
+    if any(iocs.values()):
+        parts.append('<div style="margin:12px 0 6px"><b>全局 IOC 情报清单</b></div>')
+        parts.append(_ioc_block("攻击来源 IP", iocs.get("attack_ips")))
+        parts.append(_ioc_block("目标账号", iocs.get("target_accounts")))
+        parts.append(_ioc_block("敏感路径 / webshell", iocs.get("sensitive_paths")))
+        parts.append(_ioc_block("可疑 SQL 片段", iocs.get("risky_sql")))
+        parts.append(_ioc_block("可疑命令", iocs.get("suspicious_commands")))
+    # 跨源时间线
+    tl = corr.get("timeline") or []
+    if tl:
+        rows = "".join(
+            f"<tr><td>{esc(a.get('time') or '-')}</td>"
+            f"<td class='mono'>{esc(a.get('ip') or '')}</td>"
+            f"<td><span class='badge' style='background:{SEV_COLORS.get(a.get('severity'),'#333')}'>{esc(a.get('severity_label') or a.get('severity'))}</span></td>"
+            f"<td>{esc(a.get('rule') or '')}</td><td>{esc(a.get('title') or '')}</td></tr>"
+            for a in tl
+        )
+        parts.append(f'<div style="margin:12px 0 6px"><b>跨源告警时间线（按时间）</b></div>'
+                     f"<table><tr><th>时间</th><th>来源IP</th><th>级别</th><th>规则</th><th>标题</th></tr>"
+                     f"{rows}</table>")
+    parts.append('</div>')
+    return "".join(parts)
+
+
+def _ioc_block(title: str, items) -> str:
+    if not items:
+        return ""
+    body = "\n".join(esc(x) for x in items)
+    return f'<div><b>{esc(title)}（{len(items)}）</b><div class="ioc-box">{body}</div></div>'
+
+
+def _risk_color(risk: str) -> str:
+    return {"critical": "#c0392b", "high": "#e67e22",
+            "medium": "#2980b9", "low": "#7f8c8d"}.get(risk, "#7f8c8d")
 
 
 def build_html(result, custody: dict) -> str:
@@ -273,13 +405,17 @@ def build_html(result, custody: dict) -> str:
   {''.join(alert_blocks) if alert_blocks else '<div class="kv">未触发任何检测规则。</div>'}
 </div>
 
+{_type_reports_html(d)}
+
+{_correlation_html(d)}
+
 <div class="card">
-  <h2>三、事件时间线（按小时）</h2>
+  <h2>四、事件时间线（按小时）</h2>
   {bars if bars else '<div class="kv">无带时间戳的事件。</div>'}
 </div>
 
 <div class="card">
-  <h2>四、证据链信息（Chain of Custody）</h2>
+  <h2>五、证据链信息（Chain of Custody）</h2>
   <div class="kv"><b>完整性说明:</b> {esc(custody.get('evidence_integrity', ''))}</div>
   <div class="kv"><b>分析开始:</b> {esc(custody.get('analysis_started', ''))} &nbsp; <b>分析结束:</b> {esc(custody.get('analysis_finished', ''))}</div>
   <table style="margin-top:10px">
@@ -289,7 +425,7 @@ def build_html(result, custody: dict) -> str:
 </div>
 
 <div class="card">
-  <h2>五、证据文件处理明细</h2>
+  <h2>六、证据文件处理明细</h2>
   <table>
     <tr><th>文件</th><th>解析器</th><th>解析事件数</th><th>跳过/异常原因</th></tr>
     {file_rows}

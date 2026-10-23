@@ -247,6 +247,59 @@ PLAYBOOKS: dict = {
     },
 
     # =====================================================================
+    # 3b. 多阶段攻击链（登录 → 上传 → 后门落地 → 交互）
+    # =====================================================================
+    "attack-chain": {
+        "web": {
+            "verify": [
+                {"cmd": "grep -F '{uri}' /var/log/nginx/access.log /var/log/apache2/access.log 2>/dev/null | tail -50",
+                 "note": "还原整条链：登录成功 → 上传接口 → 落地的脚本文件被反复 POST"},
+                {"cmd": "grep -E 'POST .*(upload|admin)' <access.log> | tail -30",
+                 "note": "圈出上传动作与后台管理请求，定位落地文件与攻击时间窗口"},
+            ],
+            "contain": [
+                {"cmd": "iptables -A INPUT -s {ip} -j DROP",
+                 "note": "封禁攻击来源 IP，先止血"},
+                {"cmd": "chmod 000 <webshell文件路径>; mv <webshell文件路径> /var/tmp/ir/webshell-$(date +%F).bak",
+                 "note": "把落地的脚本文件立刻降权并移出 web 目录（先留证再处理）"},
+            ],
+            "preserve": [
+                {"cmd": "cp <access.log> /var/tmp/ir/access-$(date +%F).log && sha256sum /var/tmp/ir/access-*.log",
+                 "note": "原始访问日志留证，记录攻击者 IP 与落地时间窗"},
+                {"cmd": "cp <webshell文件路径> /var/tmp/ir/webshell-$(date +%F).php && sha256sum /var/tmp/ir/webshell-*.php",
+                 "note": "webshell 本体留证（切勿在 web 目录内直接删除）"},
+            ],
+            "eradicate": [
+                {"cmd": "rm -f <webshell文件路径>",
+                 "note": "确认已留证后彻底移除后门文件"},
+                {"cmd": "grep -Rin 'eval(\\|base64_decode\\|assert(' <webroot>/ 2>/dev/null | head",
+                 "note": "排查是否还有其它后门/一句话木马"},
+                {"cmd": "重置后台/数据库账号口令，并审计近期所有上传与会话记录",
+                 "note": "根因修复：修补上传功能（限制类型/落地目录/鉴权），复核后台鉴权逻辑"},
+            ],
+        },
+        "windows": {
+            "verify": [
+                {"cmd": "Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4624,4625} -MaxEvents 500 | "
+                         "Where-Object {$_.Message -match '{ip}'}",
+                 "note": "若链路上出现 Windows 主机，确认该 IP 是否登录成功"},
+            ],
+            "contain": [
+                {"cmd": "netsh advfirewall firewall add rule name=\"IR-Block-{ip}\" dir=in action=block remoteip={ip}",
+                 "note": "在边界/主机防火墙封禁来源 IP"},
+            ],
+            "preserve": [
+                {"cmd": "wevtutil epl Security C:\\var\\tmp\\ir\\Sec-$(Get-Date -Format yyyyMMdd).evtx",
+                 "note": "安全日志留证"},
+            ],
+            "eradicate": [
+                {"cmd": "撤销被加入特权组的账号，并重置相关凭据",
+                 "note": "根因修复：收敛后台入口与上传权限"},
+            ],
+        },
+    },
+
+    # =====================================================================
     # 4. 异常账号
     # =====================================================================
     "account-abuse": {

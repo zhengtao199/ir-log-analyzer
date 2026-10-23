@@ -11,6 +11,7 @@ from .db_attack import DbAttackDetector
 from .net_anomaly import NetAnomalyDetector
 from .stream_content import StreamContentDetector
 from .http_content import HttpContentDetector
+from .attack_chain import AttackChainDetector
 from .ioc_match import IOCDetector, IOCStore, classify  # noqa: F401
 
 ALL_DETECTORS = [
@@ -25,6 +26,7 @@ ALL_DETECTORS = [
     NetAnomalyDetector,
     StreamContentDetector,
     HttpContentDetector,
+    AttackChainDetector,
     IOCDetector,
 ]
 

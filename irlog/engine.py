@@ -15,8 +15,11 @@ from .config import Config
 from .detectors import build_detectors, IOCStore
 from .models import Event, SEVERITY_LABELS
 from .parsers import iter_events, detect_parser, is_probably_log
+from .profiles import build_type_reports, build_correlation
 from .respond import attach_playbooks
+from .rulepack import RulePack
 from .session import SessionTracker
+from .stats import LogStats
 
 
 class Timeline:
@@ -68,6 +71,9 @@ class AnalysisResult:
     alerts: list = field(default_factory=list)       # [Alert]
     timeline: dict = field(default_factory=dict)
     stats: dict = field(default_factory=dict)
+    log_stats: dict = field(default_factory=dict)   # 按日志类型的统计结论（Web/Windows/Linux/DB...）
+    type_reports: list = field(default_factory=list)   # 「每类日志回答各自的应急问题」面板
+    correlation: dict = field(default_factory=dict)    # 跨类型综合关联视图
     errors: list = field(default_factory=list)
 
     def alerts_sorted(self) -> list:
@@ -89,6 +95,9 @@ class AnalysisResult:
             "severity_summary": {SEVERITY_LABELS.get(k, str(k)): v for k, v in self.severity_summary().items()},
             "files": self.files,
             "timeline": self.timeline,
+            "log_stats": self.log_stats,
+            "type_reports": self.type_reports,
+            "correlation": self.correlation,
             "alerts": [a.to_dict() for a in self.alerts_sorted()],
             "errors": self.errors,
         }
@@ -99,13 +108,22 @@ ProgressCB = Optional[Callable[[str, float], None]]
 
 def run_analysis(paths: list[str], config: Config | None = None,
                  ioc_store: IOCStore | None = None,
-                 progress: ProgressCB = None) -> AnalysisResult:
+                 progress: ProgressCB = None,
+                 rulepack: RulePack | None = None,
+                 workdir: str | None = None) -> AnalysisResult:
     """分析一批证据文件（只读）。"""
     cfg = config or Config()
     started = time.time()
     run_id = time.strftime("IR-%Y%m%d-%H%M%S", time.localtime(started))
     detectors = build_detectors(cfg, ioc_store)
+    # 自定义规则库：把用户追加的 payload / 独立规则编译成检测器一起跑
+    pack = rulepack or (RulePack.load(workdir) if workdir else None)
+    if pack:
+        from .detectors.custom import CustomRuleDetector
+        detectors.append(CustomRuleDetector(cfg, pack))
     timeline = Timeline(cfg.timeline_max_events)
+    # 按类型的统计门面：Web/Windows/Linux/数据库 各自的「事实型」结论
+    stats = LogStats()
     # 会话归属：把无源 IP 的命令执行回填到发起它的登录会话（跨文件共享会话表）
     tracker = SessionTracker(cfg.session_idle_timeout) if cfg.attribution_enabled else None
     result = AnalysisResult(run_id=run_id, started=started, finished=started)
@@ -129,6 +147,7 @@ def run_analysis(paths: list[str], config: Config | None = None,
                 if tracker is not None:
                     tracker.enrich(ev)
                 timeline.add(ev)
+                stats.feed(ev)
                 for d in detectors:
                     d.feed(ev)
                 if n % 50000 == 0:
@@ -149,6 +168,11 @@ def run_analysis(paths: list[str], config: Config | None = None,
         result.alerts.extend(d.alerts)
 
     result.timeline = timeline.to_dict()
+    result.log_stats = stats.to_dict()
+    # 「每类日志回答各自的应急问题」面板 + 跨类型综合关联视图
+    alert_dicts = [a.to_dict() for a in result.alerts]
+    result.type_reports = build_type_reports(result.log_stats, alert_dicts)
+    result.correlation = build_correlation(result.log_stats, alert_dicts)
     result.stats = {
         "total_events": total_events,
         "total_files": len(paths),
