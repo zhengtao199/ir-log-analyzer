@@ -15,7 +15,10 @@ auditd EXECVE / Sysmon 进程创建等事件本身不带源 IP，告警只能定
    也不伪造唯一结论（取证要求：结论必须可复核）。
 
 打分维度（高→低）：
-- 该 IP 在本主机上有前置登录失败（暴破后得手）——最强信号
+- 防火墙连接记录（UFW SRC/SPT）与该登录的源端口精确匹配——最强证据，
+  说明两者是同一条 TCP 连接，归属基本唯一
+- 该 IP 在本主机上有前置登录失败（暴破后得手）——强信号但可被伪装
+  （爆破噪音 IP 也可能碰巧登成功，不能仅凭它定罪）
 - 外网 IP（非 RFC1918 / 非 loopback）——内网运维 vs 外部入侵
 - 会话越新越可能（近期活动）
 - 用户匹配（命令事件自带 user 时优先同用户会话）
@@ -28,11 +31,16 @@ from typing import Optional
 
 from .models import (
     A_LOGON_FAILED, A_LOGON_SUCCESS, A_SESSION_END,
-    A_COMMAND_EXEC, A_SUDO_COMMAND, Event,
+    A_COMMAND_EXEC, A_SUDO_COMMAND, A_NETWORK_CONN, Event,
 )
 
 # 归属适用的动作（这些事件常常缺失源 IP）
 ATTRIBUTABLE = (A_COMMAND_EXEC, A_SUDO_COMMAND)
+
+# 防火墙连接记录与登录的匹配窗口：连接放行通常发生在登录建立前后数秒内
+FW_MATCH_WINDOW = 300.0
+# 防火墙精确关联加分：必须压过"暴破后得手"(50+40) 等启发式信号
+FW_MATCH_SCORE = 300.0
 
 
 def _is_private(ip: str) -> bool:
@@ -55,6 +63,8 @@ class SessionTracker:
         self.fail_score_cap = fail_score_cap
         self.sessions: dict[str, list[dict]] = {}   # host -> [session]
         self.fails: dict[tuple[str, str], int] = {}  # (host, ip) -> 失败次数
+        self.fw_conns: dict[str, list[dict]] = {}    # host -> [{"ip","sport","ts"}]
+        self._fw_trimmed = False
     # ---- 会话表维护 ----
     def _close(self, host: str, ev: Event) -> None:
         lst = self.sessions.get(host)
@@ -79,6 +89,37 @@ class SessionTracker:
                 if not s["closed"] and s["open_ts"] <= ts + 1
                 and (ts - s["last_ts"]) <= self.idle_timeout]
 
+    # ---- 防火墙关联 ----
+    def _record_fw_conn(self, host: str, ev: Event, ts: float) -> None:
+        lst = self.fw_conns.setdefault(host, [])
+        lst.append({"ip": ev.src_ip or ev.detail.get("src_ip"),
+                    "sport": ev.detail.get("sport"), "ts": ts})
+        # 只留最近窗口内的记录，防内存膨胀
+        if len(lst) > 4096:
+            del lst[: len(lst) - 4096]
+            self._fw_trimmed = True
+
+    def _fw_match(self, host: str, ip: Optional[str], sport, ts: float) -> bool:
+        """该登录是否与近期防火墙连接记录构成 (SRC, SPT) 精确匹配。"""
+        if not ip:
+            return False
+        conns = self.fw_conns.get(host)
+        if not conns:
+            return False
+        for c in reversed(conns):
+            age = ts - c["ts"]
+            if age > FW_MATCH_WINDOW:
+                break  # 记录按时间有序，再往前只会更旧
+            if age < -FW_MATCH_WINDOW:
+                continue  # 连接记录在登录之后（乱序容忍）
+            if c["ip"] != ip:
+                continue
+            # 双方都带源端口时要求相等；缺失则退化为仅 IP 匹配
+            if sport and c["sport"] and str(c["sport"]) != str(sport):
+                continue
+            return True
+        return False
+
     # ---- 归属 ----
     def attribute(self, ev: Event) -> Optional[dict]:
         """为缺失源 IP 的命令执行事件推断来源；已有 IP 则不作推断。"""
@@ -93,9 +134,12 @@ class SessionTracker:
         scored = []
         for s in cands:
             score = 0.0
+            if s.get("fw_match"):
+                # 防火墙 SRC/SPT 与登录源端口精确匹配：同一条 TCP 连接，最强证据
+                score += FW_MATCH_SCORE
             fails = self.fails.get((host, s["ip"]), 0)
             if fails:
-                score += 50 + min(fails, self.fail_score_cap)   # 暴破后得手：最强信号
+                score += 50 + min(fails, self.fail_score_cap)   # 暴破后得手：强信号（可被伪装）
             if not _is_private(s["ip"]):
                 score += 30                                      # 外网来源
             if ev.user and s["user"] == ev.user:
@@ -106,7 +150,10 @@ class SessionTracker:
 
         best_score, best, fails = scored[0]
         uniq_ips = sorted({s["ip"] for _sc, s, _f in scored})
-        if len(uniq_ips) == 1:
+        if best.get("fw_match"):
+            confidence = "高"
+            basis = "防火墙连接记录（SRC/SPT）与该登录源端口精确匹配，同一条 TCP 连接"
+        elif len(uniq_ips) == 1:
             confidence, basis = "高", "该时刻仅一个活动会话"
         else:
             confidence, basis = "中", f"{len(uniq_ips)} 个并发会话，按可疑度推断"
@@ -118,6 +165,7 @@ class SessionTracker:
             "basis": basis,
             "candidate_ips": uniq_ips,
             "prior_failures": fails,
+            "fw_match": bool(best.get("fw_match")),
             "session_opened": time.strftime("%Y-%m-%d %H:%M:%S",
                                             time.localtime(best["open_ts"]))
             if best["open_ts"] else None,
@@ -139,9 +187,15 @@ class SessionTracker:
             if lst is None:
                 lst = self.sessions[host] = []
             lst.append({"ip": ev.src_ip, "user": ev.user, "open_ts": ts,
-                        "last_ts": ts, "closed": False})
+                        "last_ts": ts, "closed": False,
+                        "fw_match": self._fw_match(host, ev.src_ip,
+                                                   ev.detail.get("sport"), ts)})
             if len(lst) > self.max_sessions_per_host:
                 del lst[: len(lst) - self.max_sessions_per_host]
+            return None
+
+        if a == A_NETWORK_CONN and ev.detail.get("firewall"):
+            self._record_fw_conn(host, ev, ts)
             return None
 
         if a == A_LOGON_FAILED:

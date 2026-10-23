@@ -658,7 +658,98 @@ PLAYBOOKS: dict = {
     },
 
     # =====================================================================
-    # 12. IOC 命中
+    # 12. 上传漏洞利用链（上传 → 落盘 → 交互）
+    # =====================================================================
+    "upload_exploit": {
+        "web": {
+            "verify": [
+                {"cmd": "grep -F '{uri}' /var/log/nginx/access.log /var/log/apache2/access.log 2>/dev/null | tail -40",
+                 "note": "看该上传接口的请求：方法、来源 IP、UA、返回码，确认是否真上传成功"},
+                {"cmd": "find <web根目录> -newermt '-3 days' \\( -name '*.php' -o -name '*.jsp' -o -name '*.asp*' \\) -ls 2>/dev/null | head -50",
+                 "note": "按上传成功的时间点找之后新增的脚本——这就是可能落盘的 Webshell"},
+            ],
+            "contain": [
+                {"cmd": "chmod 000 <落盘脚本路径>",
+                 "note": "先摘权限保留文件（便于取证），不要直接删"},
+                {"cmd": "iptables -A INPUT -s {ip} -j DROP",
+                 "note": "封禁发起上传的来源 IP"},
+            ],
+            "preserve": [
+                {"cmd": "cp <落盘脚本路径> /var/tmp/ir/ && sha256sum /var/tmp/ir/*",
+                 "note": "留存脚本本体并计算哈希，作为 IOC 与举证材料"},
+            ],
+            "eradicate": [
+                {"cmd": "rm -f <落盘脚本路径>",
+                 "note": "取证完成后删除"},
+                {"cmd": "grep -rn 'eval\\|assert\\|base64_decode\\|system(\\|passthru' <web根目录> --include='*.php' 2>/dev/null | head -30",
+                 "note": "全站排查同类后门"},
+                {"cmd": "find <web根目录> -type d -perm -o+w -ls",
+                 "note": "收敛可写目录权限，堵住上传点"},
+            ],
+        },
+    },
+
+    # =====================================================================
+    # 13. 攻击工具指纹（冰蝎/蚁剑/菜刀/sqlmap/nuclei/扫描器）
+    # =====================================================================
+    "tooling": {
+        "web": {
+            "verify": [
+                {"cmd": "grep -F '{ip}' /var/log/nginx/access.log 2>/dev/null | tail -60",
+                 "note": "把该 IP 的全部请求拉出来，看它碰了哪些接口、成功几个"},
+                {"cmd": "grep -F '{uri}' /var/log/nginx/access.log 2>/dev/null | wc -l",
+                 "note": "统计命中接口的次数，判断是否自动化工具批量扫描"},
+            ],
+            "contain": [
+                {"cmd": "iptables -A INPUT -s {ip} -j DROP",
+                 "note": "先封禁来源 IP 止血"},
+                {"cmd": "awk '{print $1}' /var/log/nginx/access.log | sort | uniq -c | sort -rn | head -20",
+                 "note": "看还有没有其他高频来源 IP，一并评估"},
+            ],
+            "preserve": [
+                {"cmd": "cp /var/log/nginx/access.log /var/tmp/ir/ && sha256sum /var/tmp/ir/access.log",
+                 "note": "留存原始访问日志"},
+            ],
+            "eradicate": [
+                {"cmd": "grep -rn 'eval\\|assert\\|base64_decode' <web根目录> --include='*.php' 2>/dev/null | head -30",
+                 "note": "工具成功利用后通常伴随落盘后门，需全站排查"},
+            ],
+        },
+    },
+
+    # =====================================================================
+    # 14. 后台登录爆破
+    # =====================================================================
+    "admin_login": {
+        "web": {
+            "verify": [
+                {"cmd": "grep -F '{uri}' /var/log/nginx/access.log 2>/dev/null | "
+                        "awk '{print $1}' | sort | uniq -c | sort -rn | head -20",
+                 "note": "统计打后台的来源 IP 与次数，找出主攻 IP"},
+                {"cmd": "grep -F '{ip}' /var/log/nginx/access.log 2>/dev/null | grep ' 302 \\| 200 ' | tail -20",
+                 "note": "**关键**：看有没有 302/200 的登录成功响应——有就说明后台口令已被打穿"},
+            ],
+            "contain": [
+                {"cmd": "iptables -A INPUT -s {ip} -j DROP",
+                 "note": "封禁爆破来源 IP"},
+                {"cmd": "find <web根目录> -maxdepth 2 -name '*.php' -newermt '-3 days' -ls",
+                 "note": "后台登录成功后常被上传插件/模板，检查近期新增文件"},
+            ],
+            "preserve": [
+                {"cmd": "cp /var/log/nginx/access.log /var/tmp/ir/ && sha256sum /var/tmp/ir/access.log",
+                 "note": "留存原始访问日志"},
+            ],
+            "eradicate": [
+                {"cmd": "grep -rn 'eval\\|assert\\|base64_decode' <web根目录> --include='*.php' 2>/dev/null | head -30",
+                 "note": "排查后台被利用后留下的后门"},
+                {"cmd": "chown -R www-data:www-data <web根目录> && find <web根目录> -type d -exec chmod 755 {} +",
+                 "note": "收敛目录属主与权限（按实际站点用户调整）"},
+            ],
+        },
+    },
+
+    # =====================================================================
+    # 15. IOC 命中
     # =====================================================================
     "ioc": {
         "windows": {

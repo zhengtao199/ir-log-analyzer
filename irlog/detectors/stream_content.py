@@ -85,6 +85,7 @@ def _mask(s: str) -> str:
 
 class StreamContentDetector(Detector):
     rule_id = "stream-content"
+    ACTIONS = {A_NET_STREAM}
     title = "TCP 流内容异常"
     description = ("重组 TCP 会话后发现反向 shell、敏感文件外传、跨报文凭据对"
                    "或会话内编码载荷")

@@ -20,6 +20,7 @@ from .respond import attach_playbooks
 from .rulepack import RulePack
 from .session import SessionTracker
 from .stats import LogStats
+from .webstats import WebStats
 
 
 class Timeline:
@@ -74,10 +75,19 @@ class AnalysisResult:
     log_stats: dict = field(default_factory=dict)   # 按日志类型的统计结论（Web/Windows/Linux/DB...）
     type_reports: list = field(default_factory=list)   # 「每类日志回答各自的应急问题」面板
     correlation: dict = field(default_factory=dict)    # 跨类型综合关联视图
+    web_stats: dict = field(default_factory=dict)      # Web 流量统计（仅 Web 日志非空）
+    quiz: dict = field(default_factory=dict)           # 取证问答结果（quiz 开启时非空）
+    ir_plan: dict = field(default_factory=dict)        # 应急响应处置方案（阶段式）
     errors: list = field(default_factory=list)
 
     def alerts_sorted(self) -> list:
         return sorted(self.alerts, key=lambda a: (a.severity, -(a.count or 0)))
+
+    def by_rule(self) -> dict:
+        out = {}
+        for a in self.alerts:
+            out[a.rule_id] = out.get(a.rule_id, 0) + 1
+        return out
 
     def severity_summary(self) -> dict:
         out = {}
@@ -98,6 +108,9 @@ class AnalysisResult:
             "log_stats": self.log_stats,
             "type_reports": self.type_reports,
             "correlation": self.correlation,
+            "web_stats": self.web_stats,
+            "quiz": self.quiz,
+            "ir_plan": self.ir_plan,
             "alerts": [a.to_dict() for a in self.alerts_sorted()],
             "errors": self.errors,
         }
@@ -110,8 +123,13 @@ def run_analysis(paths: list[str], config: Config | None = None,
                  ioc_store: IOCStore | None = None,
                  progress: ProgressCB = None,
                  rulepack: RulePack | None = None,
-                 workdir: str | None = None) -> AnalysisResult:
-    """分析一批证据文件（只读）。"""
+                 workdir: str | None = None,
+                 with_quiz: bool = True, with_plan: bool = True,
+                 status_code: int = 200) -> AnalysisResult:
+    """分析一批证据文件（只读）。
+
+    with_quiz：是否顺便求解取证题目（靶场题型），with_plan：是否生成阶段式处置方案。
+    """
     cfg = config or Config()
     started = time.time()
     run_id = time.strftime("IR-%Y%m%d-%H%M%S", time.localtime(started))
@@ -121,7 +139,23 @@ def run_analysis(paths: list[str], config: Config | None = None,
     if pack:
         from .detectors.custom import CustomRuleDetector
         detectors.append(CustomRuleDetector(cfg, pack))
+    # 按动作分发：只把事件喂给关心它的检测器，省掉大量无效调用
+    always: list = []
+    by_action: dict = {}
+    for d in detectors:
+        acts = getattr(d, "ACTIONS", None)
+        if not acts:
+            always.append(d)
+        else:
+            for a in acts:
+                by_action.setdefault(a, []).append(d)
     timeline = Timeline(cfg.timeline_max_events)
+    # 靶场取证问答：单遍扫描顺带求解（Web 日志题型）
+    webstats = WebStats()
+    quiz_eng = None
+    if with_quiz:
+        from .quiz import QuizEngine
+        quiz_eng = QuizEngine(cfg, stats=webstats)
     # 按类型的统计门面：Web/Windows/Linux/数据库 各自的「事实型」结论
     stats = LogStats()
     # 会话归属：把无源 IP 的命令执行回填到发起它的登录会话（跨文件共享会话表）
@@ -148,8 +182,15 @@ def run_analysis(paths: list[str], config: Config | None = None,
                     tracker.enrich(ev)
                 timeline.add(ev)
                 stats.feed(ev)
-                for d in detectors:
+                webstats.feed(ev)
+                if quiz_eng is not None:
+                    quiz_eng.feed(ev)
+                for d in always:
                     d.feed(ev)
+                extra = by_action.get(ev.action)
+                if extra:
+                    for d in extra:
+                        d.feed(ev)
                 if n % 50000 == 0:
                     _p(f"已处理 {n} 条", 0.5)
             total_events += n
@@ -160,12 +201,19 @@ def run_analysis(paths: list[str], config: Config | None = None,
             result.files.append({"path": path, "log_type": None, "events": 0,
                                  "skipped_reason": f"解析异常: {exc}"})
 
+    truncated: dict = {}
     for d in detectors:
         try:
             d.finalize()
         except Exception as exc:
             result.errors.append(f"检测器 {d.rule_id} 异常: {type(exc).__name__}: {exc}")
-        result.alerts.extend(d.alerts)
+        # 告警爆炸保护：扫描型日志会让单规则产出数千条告警，淹没重点且撑爆报告
+        al = sorted(d.alerts, key=lambda a: (a.severity, -(a.count or 0)))
+        cap = getattr(cfg, "max_alerts_per_rule", 0) or 0
+        if cap and len(al) > cap:
+            truncated[d.rule_id] = len(al) - cap
+            al = al[:cap]
+        result.alerts.extend(al)
 
     result.timeline = timeline.to_dict()
     result.log_stats = stats.to_dict()
@@ -173,11 +221,26 @@ def run_analysis(paths: list[str], config: Config | None = None,
     alert_dicts = [a.to_dict() for a in result.alerts]
     result.type_reports = build_type_reports(result.log_stats, alert_dicts)
     result.correlation = build_correlation(result.log_stats, alert_dicts)
+    result.web_stats = webstats.to_dict()
+    if quiz_eng is not None:
+        result.quiz = quiz_eng.solve(status_code)
+    if with_plan:
+        from .irplaybook import build_plan
+        try:
+            result.ir_plan = build_plan(result)
+        except Exception as exc:
+            result.errors.append(f"处置方案生成异常: {type(exc).__name__}: {exc}")
     result.stats = {
         "total_events": total_events,
         "total_files": len(paths),
         "alert_count": len(result.alerts),
         "ioc_count": len(ioc_store.items) if ioc_store else 0,
+        "by_rule": result.by_rule(),
+        "alert_truncated": truncated,
+        "alert_count_before_truncate": len(result.alerts) + sum(truncated.values()),
+        "truncate_note": ("告警已按规则截断（保留 TopN）："
+                          + "；".join(f"{k} 丢弃 {v} 条" for k, v in sorted(truncated.items()))
+                          if truncated else ""),
     }
     # 处置剧本：按告警实体与证据来源生成四阶段响应命令（只产出文本，不执行）
     try:

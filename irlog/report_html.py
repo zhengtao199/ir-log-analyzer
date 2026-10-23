@@ -189,7 +189,7 @@ def _type_reports_html(d: dict) -> str:
     reports = d.get("type_reports") or []
     if not reports:
         return ""
-    parts = ['<div class="card"><h2>二、类型分析结论（按日志类型分别回答应急问题）</h2>']
+    parts = ['<div class="card"><h2>六、类型分析结论（按日志类型分别回答应急问题）</h2>']
     for r in reports:
         kpis = "".join(
             f'<div class="kpi {esc(k.get("tone", "normal"))}">'
@@ -225,7 +225,7 @@ def _correlation_html(d: dict) -> str:
     corr = d.get("correlation") or {}
     if not corr:
         return ""
-    parts = ['<div class="card"><h2>三、跨类型综合关联视图</h2>']
+    parts = ['<div class="card"><h2>七、跨类型综合关联视图</h2>']
     # 关联结论
     concls = corr.get("conclusions") or []
     if concls:
@@ -287,6 +287,128 @@ def _ioc_block(title: str, items) -> str:
 def _risk_color(risk: str) -> str:
     return {"critical": "#c0392b", "high": "#e67e22",
             "medium": "#2980b9", "low": "#7f8c8d"}.get(risk, "#7f8c8d")
+
+
+def _quiz_section(result) -> str:
+    q = getattr(result, "quiz", None) or {}
+    if not q:
+        return ""
+    rows = []
+    for item in q["questions"]:
+        cands = ""
+        for c in (item.get("candidates") or [])[:3]:
+            cands += (f"<div class='kv' style='margin-left:12px'>· <span class='mono'>{esc(c['path'])}</span>"
+                      f"（得分 {c['score']}）<br><span style='color:#566573'>{'；'.join(c['reasons'])}</span></div>")
+        rows.append(
+            f"<tr><td style='white-space:nowrap'>题目{item['no']}</td>"
+            f"<td>{esc(item['title'])}</td>"
+            f"<td class='mono' style='color:#c0392b;font-weight:700'>{esc(item['answer_text'])}</td>"
+            f"<td>{esc(item['reason'])}{cands}</td></tr>")
+    return f"""
+<div class="card">
+  <h2>三、取证问答（靶场题型自动求解）</h2>
+  <table>
+    <tr><th>#</th><th>问题</th><th>答案</th><th>判定依据与候选</th></tr>
+    {''.join(rows)}
+  </table>
+  <div style="margin-top:14px;background:#fdecea;border-left:4px solid #c0392b;padding:12px 16px;border-radius:0 8px 8px 0">
+    <b>FLAG：</b><span class="mono" style="font-size:15px;color:#c0392b">{esc(q.get('flag', ''))}</span>
+    <div style="font-size:12px;color:#7f8c8d;margin-top:4px">拼接模板：{esc(q.get('flag_template', ''))}</div>
+  </div>
+</div>"""
+
+
+def _web_section(result) -> str:
+    ws = getattr(result, "web_stats", None) or {}
+    if not ws.get("total_requests"):
+        return ""
+    cls = ws.get("by_status_class") or {}
+    cards = "".join(
+        f'<div class="stat"><div class="num">{v:,}</div><div class="lbl">{esc(k)} 响应</div></div>'
+        for k, v in sorted(cls.items()))
+    st_rows = "".join(
+        f"<tr><td class='mono'>{esc(k)}</td><td>{v:,}</td></tr>"
+        for k, v in sorted((ws.get("by_status") or {}).items(), key=lambda x: str(x[0])))
+    m_rows = "".join(
+        f"<tr><td class='mono'>{esc(k)}</td><td>{v:,}</td></tr>"
+        for k, v in (ws.get("by_method") or {}).items())
+    ip_rows = "".join(
+        f"<tr><td class='mono'>{esc(i['ip'])}</td><td>{i['count']:,}</td></tr>"
+        for i in (ws.get("top_src_ip") or [])[:10])
+    uri_rows = "".join(
+        f"<tr><td class='mono'>{esc(i['uri'])}</td><td>{i['count']:,}</td></tr>"
+        for i in (ws.get("top_uri") or [])[:10])
+    ua_rows = "".join(
+        f"<tr><td class='mono'>{esc(i['ua'][:110])}</td><td>{i['count']:,}</td></tr>"
+        for i in (ws.get("top_user_agent") or [])[:8])
+    return f"""
+<div class="card">
+  <h2>四、Web 流量统计</h2>
+  <div class="stat-row"><div class="stat"><div class="num">{ws['total_requests']:,}</div>
+    <div class="lbl">请求总数</div></div>{cards}</div>
+  <div class="stat-row" style="margin-top:12px">
+    <div style="flex:1"><b>状态码</b><table><tr><th>状态</th><th>次数</th></tr>{st_rows}</table></div>
+    <div style="flex:1"><b>请求方法（{ws.get('method_kinds', 0)} 种）</b>
+      <table><tr><th>方法</th><th>次数</th></tr>{m_rows}</table></div>
+    <div style="flex:2"><b>Top 来源 IP</b><table><tr><th>IP</th><th>次数</th></tr>{ip_rows}</table></div>
+  </div>
+  <div class="stat-row" style="margin-top:12px">
+    <div style="flex:3"><b>Top 请求路径</b><table><tr><th>路径</th><th>次数</th></tr>{uri_rows}</table></div>
+    <div style="flex:2"><b>Top User-Agent</b><table><tr><th>UA</th><th>次数</th></tr>{ua_rows}</table></div>
+  </div>
+</div>"""
+
+
+def _plan_section(result) -> str:
+    plan = getattr(result, "ir_plan", None) or {}
+    if not plan:
+        return ""
+    sev_html = (f"<div style='background:#fdecea;border-left:4px solid #c0392b;padding:10px 14px;"
+                f"border-radius:0 8px 8px 0;margin-bottom:12px'><b>事件定级：</b>{esc(plan.get('severity'))}</div>")
+    sum_rows = "".join(
+        f"<tr><th style='width:150px'>{esc(k)}</th><td>{esc(v if not isinstance(v, list) else '，'.join(map(str, v)))}</td></tr>"
+        for k, v in (plan.get("summary") or {}).items())
+    ioc_rows = "".join(
+        f"<tr><td>{esc(i['type'])}</td><td class='mono'>{esc(i['value'])}</td><td>{esc(i['note'])}</td></tr>"
+        for i in (plan.get("ioc") or [])[:30])
+    ms_rows = "".join(
+        f"<tr><td class='mono' style='white-space:nowrap'>{esc(m['time'])}</td>"
+        f"<td>{esc(m['event'])}</td><td>{esc(m['detail'])}</td></tr>"
+        for m in (plan.get("milestones") or []))
+    phase_blocks = []
+    for ph in plan.get("phases", []):
+        items = []
+        for a in ph["actions"]:
+            cmds = "".join(f"<div class='ev'>{esc(c)}</div>" for c in a.get("commands", []))
+            basis = "；".join(a.get("basis", []))
+            items.append(f"""
+<details {'open' if a['priority'] == 0 else ''}>
+  <summary>
+    <span class="badge" style="background:{'#c0392b' if a['priority'] == 0 else ('#e67e22' if a['priority'] == 1 else '#2980b9')}">{esc(a['priority_label'])}</span>
+    <b>{esc(a['title'])}</b>
+  </summary>
+  <div class="body">
+    <div class="kv">{esc(a['detail'])}</div>
+    {f'<div class="kv"><b>依据：</b>{esc(basis)}</div>' if basis else ''}
+    {f'<div style="margin-top:8px"><b>可执行命令 / 检查项：</b></div>{cmds}' if cmds else ''}
+  </div>
+</details>""")
+        phase_blocks.append(
+            f"<details open><summary><b>{esc(ph['title'])}</b>"
+            f"<span style='color:#7f8c8d;font-size:12px;margin-left:10px'>{esc(ph['goal'])}</span></summary>"
+            f"<div class='body'>{''.join(items)}</div></details>")
+    return f"""
+<div class="card">
+  <h2>五、应急响应处置方案（阶段式）</h2>
+  {sev_html}
+  <table style="margin-bottom:14px">{sum_rows}</table>
+  <h3 style="font-size:15px;margin:14px 0 8px">关键时间线</h3>
+  <table><tr><th>时间</th><th>事件</th><th>说明</th></tr>{ms_rows or '<tr><td colspan="3">无</td></tr>'}</table>
+  <h3 style="font-size:15px;margin:14px 0 8px">IOC 清单</h3>
+  <table><tr><th>类型</th><th>值</th><th>说明</th></tr>{ioc_rows or '<tr><td colspan="3">无</td></tr>'}</table>
+  <h3 style="font-size:15px;margin:14px 0 8px">分阶段处置动作</h3>
+  {''.join(phase_blocks)}
+</div>"""
 
 
 def build_html(result, custody: dict) -> str:
@@ -360,6 +482,11 @@ def build_html(result, custody: dict) -> str:
         for h, c in list(hist.items())
     )
 
+    # 取证问答 / Web 流量统计 / 阶段式处置方案（有数据才渲染）
+    quiz_html = _quiz_section(result)
+    web_html = _web_section(result)
+    plan_html = _plan_section(result)
+
     stats = d["stats"]
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -405,17 +532,23 @@ def build_html(result, custody: dict) -> str:
   {''.join(alert_blocks) if alert_blocks else '<div class="kv">未触发任何检测规则。</div>'}
 </div>
 
+{quiz_html}
+
+{web_html}
+
+{plan_html}
+
 {_type_reports_html(d)}
 
 {_correlation_html(d)}
 
 <div class="card">
-  <h2>四、事件时间线（按小时）</h2>
+  <h2>八、事件时间线（按小时）</h2>
   {bars if bars else '<div class="kv">无带时间戳的事件。</div>'}
 </div>
 
 <div class="card">
-  <h2>五、证据链信息（Chain of Custody）</h2>
+  <h2>九、证据链信息（Chain of Custody）</h2>
   <div class="kv"><b>完整性说明:</b> {esc(custody.get('evidence_integrity', ''))}</div>
   <div class="kv"><b>分析开始:</b> {esc(custody.get('analysis_started', ''))} &nbsp; <b>分析结束:</b> {esc(custody.get('analysis_finished', ''))}</div>
   <table style="margin-top:10px">
@@ -425,7 +558,7 @@ def build_html(result, custody: dict) -> str:
 </div>
 
 <div class="card">
-  <h2>六、证据文件处理明细</h2>
+  <h2>十、证据文件处理明细</h2>
   <table>
     <tr><th>文件</th><th>解析器</th><th>解析事件数</th><th>跳过/异常原因</th></tr>
     {file_rows}

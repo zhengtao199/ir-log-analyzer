@@ -34,6 +34,7 @@ SENSITIVE_RE = re.compile(
 
 class WebAttackDetector(Detector):
     rule_id = "web-attack"
+    ACTIONS = {A_HTTP_REQUEST}
     title = "Web 攻击 / 扫描探测"
     description = "发现 SQL 注入、XSS、路径遍历、敏感文件探测或扫描器行为"
     mitre = "T1190 Exploit Public-Facing Application / T1595 Active Scanning"

@@ -61,6 +61,8 @@ class Config:
     attribution_enabled: bool = True         # 为无源 IP 的命令执行回填来源会话
     session_idle_timeout: float = 1800.0     # 会话空闲超时（秒），超时自动关闭
 
+    max_alerts_per_rule: int = 80              # 单条规则最多保留多少告警（按严重度/次数取 TopN，防告警爆炸）
+
     # ---- 横向移动 ----
     lateral_type3_burst: int = 10              # 单 IP 远程交互登录次数
     lateral_max_hosts: int = 3                 # 单账号登录主机数上限

@@ -82,6 +82,7 @@ def _entropy(s: str) -> float:
 
 class NetAnomalyDetector(Detector):
     rule_id = "net-anomaly"
+    ACTIONS = {A_NETWORK_CONN, A_NET_DNS, A_NET_CRED, A_NET_FLOW}
     title = "流量异常 / 扫描探测 / C2 通信"
     description = "发现端口或主机扫描、周期性信标（C2 心跳）、DNS 隧道/DGA、明文凭据传输或可疑外联"
     mitre = "T1046 Network Service Discovery / T1071 Application Layer Protocol / T1041 Exfiltration Over C2"

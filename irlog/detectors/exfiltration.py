@@ -13,6 +13,7 @@ SENSITIVE_RE = re.compile(
 
 class ExfiltrationDetector(Detector):
     rule_id = "exfiltration"
+    ACTIONS = {A_HTTP_REQUEST}
     title = "数据外传"
     description = "发现超大响应体下载、单 IP 流量异常或敏感文件批量访问"
     mitre = "T1041 Exfiltration Over C2 Channel / T1567 Exfiltration Over Web Service"

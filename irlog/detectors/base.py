@@ -21,6 +21,8 @@ class Detector:
     description: str = ""
     mitre: str = ""
     recommendation: str = ""
+    # 关注哪些归一化动作；None = 全部（引擎按动作分发，减少无关调用开销）
+    ACTIONS: set | None = None
 
     def __init__(self, config) -> None:
         self.config = config

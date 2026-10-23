@@ -12,6 +12,9 @@ from .net_anomaly import NetAnomalyDetector
 from .stream_content import StreamContentDetector
 from .http_content import HttpContentDetector
 from .attack_chain import AttackChainDetector
+from .upload_exploit import UploadExploitDetector
+from .tooling import ToolingDetector
+from .admin_login import AdminLoginDetector
 from .ioc_match import IOCDetector, IOCStore, classify  # noqa: F401
 
 ALL_DETECTORS = [
@@ -27,6 +30,9 @@ ALL_DETECTORS = [
     StreamContentDetector,
     HttpContentDetector,
     AttackChainDetector,
+    UploadExploitDetector,
+    ToolingDetector,
+    AdminLoginDetector,
     IOCDetector,
 ]
 

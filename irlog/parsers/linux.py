@@ -16,7 +16,7 @@ from typing import Generator, Optional
 from ..models import (
     Event,
     A_LOGON_FAILED, A_LOGON_SUCCESS, A_SUDO_COMMAND, A_GENERIC,
-    A_COMMAND_EXEC, A_SESSION_END,
+    A_COMMAND_EXEC, A_SESSION_END, A_NETWORK_CONN,
 )
 from .base import LogParser, register
 
@@ -51,6 +51,10 @@ DISCONNECT_RE = re.compile(
     r"(?:Disconnected|Connection closed) (?:from|by)"
     r"(?:\s+(?:invalid user\s+)?(?P<user>\S+))?"
     r"(?:\s+(?P<ip>\d+\.\d+\.\d+\.\d+))?", re.I)
+# 防火墙（UFW/iptables front-end）连接记录：[UFW ALLOW] ... SRC=x.x.x.x DST=... PROTO=TCP SPT=52341 DPT=22
+# 用途：与 sshd Accepted 的源端口做精确匹配，把命令执行归属到"同一条 TCP 连接"的来源 IP
+FIREWALL_RE = re.compile(r"\[UFW\s+(?P<fwaction>[A-Z ]+)\]")
+FW_KV_RE = re.compile(r"\b(SRC|DST|PROTO|SPT|DPT)=([^\s]+)")
 
 
 def _ts(mon: str, day: int, hh: int, mm: int, ss: int) -> float:
@@ -112,13 +116,30 @@ class LinuxAuthParser(LogParser):
             sm = SUDO_RE.search(msg)
             em = SSHD_EXECUTE_RE.search(msg) if proc.startswith("sshd") else None
             xv = EXECVE_RE.search(msg)
+            fwm = FIREWALL_RE.search(msg) if proc.startswith("kernel") else None
 
-            if fm:
+            if fwm:
+                # 防火墙连接记录：归一为网络连接事件，供会话归属做源端口精确关联
+                action = A_NETWORK_CONN
+                kv = dict(FW_KV_RE.findall(msg))
+                src_ip = kv.get("SRC")
+                detail["firewall"] = True
+                detail["fw_action"] = fwm.group("fwaction").strip()
+                if kv.get("SPT"):
+                    detail["sport"] = kv["SPT"]
+                if kv.get("DPT"):
+                    detail["dport"] = kv["DPT"]
+                if kv.get("PROTO"):
+                    detail["proto"] = kv["PROTO"]
+                if kv.get("DST"):
+                    detail["dst_ip"] = kv["DST"]
+            elif fm:
                 action = A_LOGON_FAILED
                 user, src_ip = fm.group("user"), fm.group("ip")
             elif am:
                 action = A_LOGON_SUCCESS
                 user, src_ip = am.group("user"), am.group("ip")
+                detail["sport"] = am.group("port")  # 供防火墙 SRC/SPT 精确关联
             elif im:
                 action = A_LOGON_FAILED
                 user, src_ip = im.group("user"), im.group("ip")

@@ -81,6 +81,7 @@ SCRIPT_CONTENT_RE = re.compile(
 
 class HttpContentDetector(Detector):
     rule_id = "http-content"
+    ACTIONS = {A_HTTP_REQUEST}
     title = "HTTP 内容异常（请求体/响应体）"
     description = ("重组并解码 HTTP 内容后发现命令执行回显、敏感文件外传、"
                    "Webshell 交互或恶意载荷下载")

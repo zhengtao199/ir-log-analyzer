@@ -21,6 +21,7 @@ from .base import Detector
 
 class AttackChainDetector(Detector):
     rule_id = "attack-chain"
+    ACTIONS = {A_HTTP_REQUEST}
     title = "攻击链还原（登录 / 上传 / 后门落地）"
     description = ("发现跨请求的攻击链：后台登录成功、文件上传漏洞被利用、"
                    "上传后才出现的脚本被反复 POST 交互（疑似 webshell）")

@@ -39,6 +39,7 @@ INTERPRETERS = ("cmd.exe", "powershell.exe", "pwsh.exe", "bash", "sh", "/bin/sh"
 
 class WebshellDetector(Detector):
     rule_id = "webshell"
+    ACTIONS = {A_HTTP_REQUEST, A_PROCESS_CREATE}
     title = "Webshell / 后门"
     description = "发现疑似 Webshell 行为：上传目录中的可执行脚本或 Web 进程派生命令执行"
     mitre = "T1505.003 Server Software Component: Web Shell / T1190 Exploit Public-Facing Application"
