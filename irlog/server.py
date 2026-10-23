@@ -33,6 +33,7 @@ from .evidence import EvidenceSet, chain_of_custody, sha256_file
 from .parsers import detect_parser
 from .report_html import write_html_report
 from .report_json import write_json_report
+from .report_playbook import write_playbook_html
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 MAX_UPLOAD = 2 << 30  # 2GB
@@ -406,6 +407,9 @@ class Handler(BaseHTTPRequestHandler):
             task.result = result.to_dict()
             task.result["report_json"] = prefix + ".json"
             task.result["report_html"] = prefix + ".html"
+            if result.alerts:      # 有告警才产出手册
+                write_playbook_html(prefix + "-playbook.html", result, custody)
+                task.result["report_playbook"] = prefix + "-playbook.html"
             task.status = "done"
             task.progress = 1.0
             task.message = "分析完成"
@@ -451,15 +455,20 @@ class Handler(BaseHTTPRequestHandler):
     def _api_report(self, run_id: str) -> None:
         qs = parse_qs(urlparse(self.path).query)
         fmt = (qs.get("format") or ["html"])[0]
-        if fmt not in ("html", "json"):
+        if fmt not in ("html", "json", "playbook"):
             fmt = "html"
         safe_id = re.sub(r"[^A-Za-z0-9\-]", "", run_id)
-        path = os.path.join(self.state.workdir, f"{safe_id}.{fmt}")
+        if fmt == "playbook":
+            path = os.path.join(self.state.workdir, f"{safe_id}-playbook.html")
+        else:
+            path = os.path.join(self.state.workdir, f"{safe_id}.{fmt}")
         if not os.path.isfile(path):
             self._send_json({"error": "report not found"}, 404)
             return
         self.state.audit.record(self.client_address[0], "report-download", run_id=safe_id, fmt=fmt)
-        self._send_file(path, "text/html; charset=utf-8" if fmt == "html" else "application/json")
+        ctype = ("text/html; charset=utf-8" if fmt in ("html", "playbook")
+                 else "application/json")
+        self._send_file(path, ctype)
 
 
 def run_server(host: str = "127.0.0.1", port: int = 8611,

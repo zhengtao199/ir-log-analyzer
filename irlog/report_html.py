@@ -63,6 +63,26 @@ details .body { padding: 12px 16px; }
 footer { text-align: center; color: #95a5a6; font-size: 12px; padding: 18px; }
 .mono { font-family: Consolas, monospace; font-size: 12px; }
 .hash { max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+/* ---- 处置剧本 ---- */
+.pb { margin-top: 12px; border: 1px solid #d6eaf8; border-radius: 8px; overflow: hidden; }
+.pb-h { background: #ebf5fb; padding: 8px 14px; font-size: 13px; font-weight: 600;
+        color: #1a5276; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.pb-h .plats { font-weight: 400; font-size: 12px; color: #2874a6; }
+.pb-stage { border-top: 1px solid #e8f1f8; padding: 10px 14px; }
+.pb-stage > .st-t { font-weight: 600; font-size: 13px; color: #1a5276; }
+.pb-stage > .st-h { font-size: 12px; color: #7f8c8d; margin: 2px 0 8px; }
+.cmd { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0;
+       background: #fbfcfd; border: 1px solid #edf1f4; border-radius: 6px; padding: 8px 10px; }
+.cmd pre { flex: 1; font-family: Consolas, "Courier New", monospace; font-size: 12px;
+           white-space: pre-wrap; word-break: break-all; margin: 0; color: #1b2631; }
+.cmd .note { font-size: 12px; color: #566573; margin-top: 4px; }
+.cmd button { flex-shrink: 0; border: 1px solid #aed6f1; background: #fff; color: #1a5276;
+              border-radius: 4px; padding: 3px 9px; font-size: 12px; cursor: pointer; }
+.cmd button:hover { background: #ebf5fb; }
+.cmd .pf { font-size: 11px; color: #95a5a6; border: 1px solid #e1e8ed; border-radius: 3px;
+           padding: 0 5px; margin-right: 4px; }
+.pb-miss { font-size: 12px; color: #b9770e; background: #fef9e7; border-radius: 4px;
+           padding: 4px 10px; margin: 6px 14px 10px; }
 """
 
 JS = """
@@ -72,6 +92,23 @@ function filterAlerts(sev, btn) {
   document.querySelectorAll('details.alert').forEach(d => {
     d.style.display = (sev === 'all' || d.dataset.sev === String(sev)) ? '' : 'none';
   });
+}
+function copyCmd(btn, id) {
+  var txt = document.getElementById(id).innerText;
+  var done = function () {
+    var old = btn.innerText; btn.innerText = '已复制';
+    setTimeout(function () { btn.innerText = old; }, 1500);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(done, function () { fallbackCopy(txt, done); });
+  } else { fallbackCopy(txt, done); }
+}
+function fallbackCopy(txt, cb) {
+  var ta = document.createElement('textarea');
+  ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); cb && cb(); } catch (e) {}
+  document.body.removeChild(ta);
 }
 """
 
@@ -91,6 +128,33 @@ def _fmt_size(n: int) -> str:
             return f"{n:.1f}{unit}" if unit != "B" else f"{n}B"
         n /= 1024
     return f"{n:.1f}TB"
+
+
+def _playbook_html(pb: dict, idx: int) -> str:
+    """把一条告警的四阶段处置剧本渲染成 HTML（命令可一键复制）。"""
+    if not pb or not pb.get("stages"):
+        return ""
+    plats = " / ".join(pb.get("platform_labels") or [])
+    parts = [f'<div class="pb"><div class="pb-h">🚨 应急响应处置剧本'
+             f'<span class="plats">适用平台: {esc(plats)}</span></div>']
+    if pb.get("missing_vars"):
+        tips = "、".join(f"&lt;{esc(m)}&gt;" for m in pb["missing_vars"])
+        parts.append(f'<div class="pb-miss">⚠ 命令中的 {tips} 未能从日志中自动取到，'
+                     f'请按现场实际情况替换后再执行。</div>')
+    for st in pb["stages"]:
+        parts.append(f'<div class="pb-stage"><div class="st-t">{esc(st["label"])}</div>'
+                     f'<div class="st-h">{esc(st.get("hint", ""))}</div>')
+        for j, c in enumerate(st["cmds"]):
+            cid = f"cmd-{idx}-{st['key']}-{j}"
+            pf = f'<span class="pf">{esc(c.get("platform", ""))}</span>' if c.get("platform") else ""
+            note = f'<div class="note">{esc(c.get("note", ""))}</div>' if c.get("note") else ""
+            parts.append(
+                f'<div class="cmd">{pf}<div style="flex:1">'
+                f'<pre id="{cid}">{esc(c["cmd"])}</pre>{note}</div>'
+                f'<button onclick="copyCmd(this, \'{cid}\')">复制</button></div>')
+        parts.append('</div>')
+    parts.append('</div>')
+    return "".join(parts)
 
 
 def build_html(result, custody: dict) -> str:
@@ -126,7 +190,7 @@ def build_html(result, custody: dict) -> str:
 
     # 告警明细
     alert_blocks = []
-    for a in alerts:
+    for idx, a in enumerate(alerts):
         sev = a["severity"]
         ent = " ".join(
             f"<span class='kv'><b>{esc(k)}:</b> {esc(v if not isinstance(v, (list, set)) else ', '.join(map(str, v)))}</span>"
@@ -136,6 +200,7 @@ def build_html(result, custody: dict) -> str:
             f"<div class='ev'>[{esc(e['time'] or '?')}] ({esc(_basename(e['source']))})\n{esc(e['raw'])}</div>"
             for e in a["evidence"]
         )
+        pb_html = _playbook_html(a.get("playbook"), idx)
         alert_blocks.append(f"""
 <details class="alert" data-sev="{sev}">
   <summary>
@@ -149,6 +214,7 @@ def build_html(result, custody: dict) -> str:
     <div class="kv"><b>关联实体:</b> {ent}</div>
     <div class="kv"><b>ATT&CK:</b> <span class="mitre">{esc(a['mitre'])}</span></div>
     <div class="rec"><b>处置建议:</b> {esc(a['recommendation'])}</div>
+    {pb_html}
     <div style="margin-top:10px"><b>证据样本（原始日志，只读未改动）:</b></div>
     {ev_html or '<div class="kv">（无采样证据）</div>'}
   </div>

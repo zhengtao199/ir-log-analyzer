@@ -9,12 +9,13 @@
 scan 选项：
     --ioc FILE             IOC 列表（txt 每行一条 / csv 首列）
     --out PREFIX           报告输出前缀（默认 irlog-output/<run_id>）
-    --format cli,json,html 输出格式（默认全部）
+    --format cli,json,html 输出格式（默认全部；加 md 可额外导出 Markdown 版处置手册）
     --set key=value        覆盖阈值，可多次（如 --set brute_force_threshold=3；
                            --set 传错时会列出全部可用键名）
     --operator NAME        分析人（写入证据链）
     --workdir DIR          工作目录（默认 ./irlog-output）
     --no-recursive         目录不递归
+    --no-playbook          不生成《应急响应处置手册》（默认随报告一起产出）
     --quiet                精简输出
 
 退出码：0 无告警 / 1 仅低中危 / 2 存在高危或紧急 / 3 执行出错
@@ -35,6 +36,7 @@ from .evidence import EvidenceSet, chain_of_custody
 from .models import SEVERITY_LABELS
 from .report_html import write_html_report
 from .report_json import write_json_report
+from .report_playbook import write_playbook_html, write_playbook_markdown
 
 
 def _collect_paths(paths: list[str], recursive: bool) -> list[str]:
@@ -141,6 +143,15 @@ def cmd_scan(args: argparse.Namespace) -> int:
         p = out_prefix + ".html"
         write_html_report(p, result, custody)
         produced.append(p)
+    # 处置手册：默认随报告一起产出，--no-playbook 可关闭
+    if not args.no_playbook and result.alerts:
+        p = out_prefix + "-playbook.html"
+        write_playbook_html(p, result, custody)
+        produced.append(p)
+        if args.format and "md" in [f.strip().lower() for f in args.format.split(",")]:
+            pm = out_prefix + "-playbook.md"
+            write_playbook_markdown(pm, result)
+            produced.append(pm)
 
     _print_alerts(result)
     if not args.quiet:
@@ -218,6 +229,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--workdir", default="irlog-output", help="工作目录")
     sp.add_argument("--no-recursive", action="store_true", help="目录不递归")
     sp.add_argument("--quiet", action="store_true", help="精简输出")
+    sp.add_argument("--no-playbook", action="store_true",
+                    help="不生成《应急响应处置手册》（默认随报告一起产出）")
     sp.set_defaults(func=cmd_scan)
 
     sp = sub.add_parser("hash", help="计算证据文件 SHA256")

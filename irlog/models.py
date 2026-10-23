@@ -87,6 +87,7 @@ class Alert:
     description: str = ""
     mitre: str = ""
     recommendation: str = ""
+    playbook: dict = field(default_factory=dict)   # 四阶段处置剧本（respond.py 生成）
 
     def to_dict(self) -> dict:
         return {
@@ -107,6 +108,7 @@ class Alert:
             "description": self.description,
             "mitre": self.mitre,
             "recommendation": self.recommendation,
+            "playbook": self.playbook,
         }
 
 

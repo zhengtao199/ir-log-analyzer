@@ -26,10 +26,13 @@ class BruteForceDetector(Detector):
         if not self.enabled or ev.action != A_LOGON_FAILED or not ev.src_ip:
             return
         ip = ev.src_ip
-        st = self.state.setdefault(ip, {"users": set(), "count": 0, "first": None, "last": None, "evidence": []})
+        st = self.state.setdefault(ip, {"users": set(), "hosts": set(), "count": 0,
+                                        "first": None, "last": None, "evidence": []})
         st["count"] += 1
         if ev.user:
             st["users"].add(ev.user)
+        if ev.host:
+            st["hosts"].add(ev.host)
         if ev.ts is not None:
             st["first"] = ev.ts if st["first"] is None else min(st["first"], ev.ts)
             st["last"] = ev.ts if st["last"] is None else max(st["last"], ev.ts)
@@ -53,7 +56,8 @@ class BruteForceDetector(Detector):
             self._alert(
                 severity=severity,
                 count=st["count"],
-                entities={"src_ip": ip, "target_users": users, "hosts": sorted({e[1] for e in st["evidence"]})[:5]},
+                entities={"src_ip": ip, "target_users": users,
+                          "hosts": sorted(h for h in st["hosts"] if h)[:5]},
                 evidence=st["evidence"],
                 first_ts=st["first"],
                 last_ts=st["last"],

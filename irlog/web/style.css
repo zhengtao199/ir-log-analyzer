@@ -185,6 +185,27 @@ table.grid .actions button, table.grid .actions .btn { margin-right: 6px; }
 }
 .ev .src { color: var(--accent); }
 
+/* ---------- 处置剧本 ---------- */
+.pb { margin-top: 12px; border: 1px solid #d6eaf8; border-radius: 8px; overflow: hidden; }
+.pb-h { background: #ebf5fb; padding: 8px 14px; font-size: 13px; font-weight: 600;
+        color: #1a5276; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.pb-h .plats { font-weight: 400; font-size: 12px; color: #2874a6; }
+.pb-stage { border-top: 1px solid #e8f1f8; padding: 10px 14px; }
+.pb-stage .st-t { font-weight: 600; font-size: 13px; color: #1a5276; }
+.pb-stage .st-h { font-size: 12px; color: var(--muted); margin: 2px 0 8px; }
+.cmd { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0;
+       background: #fbfcfd; border: 1px solid #edf1f4; border-radius: 6px; padding: 8px 10px; }
+.cmd pre { flex: 1; font-family: var(--mono); font-size: 12px; white-space: pre-wrap;
+           word-break: break-all; margin: 0; color: #1b2631; }
+.cmd .note { font-size: 12px; color: #566573; margin-top: 4px; }
+.cmd button { flex-shrink: 0; border: 1px solid #aed6f1; background: #fff; color: #1a5276;
+              border-radius: 4px; padding: 3px 9px; font-size: 12px; cursor: pointer; }
+.cmd button:hover { background: #ebf5fb; }
+.cmd .pf { font-size: 11px; color: #7f8c8d; border: 1px solid #e1e8ed; border-radius: 3px;
+           padding: 0 5px; margin-right: 4px; }
+.pb-miss { font-size: 12px; color: #b9770e; background: #fef9e7; border-radius: 4px;
+           padding: 4px 10px; margin: 6px 14px 10px; }
+
 /* ---------- 时间线图 ---------- */
 .timeline-chart { width: 100%; height: auto; display: block; }
 .legend { display: flex; gap: 18px; font-size: 12px; color: var(--muted); margin: 8px 0; flex-wrap: wrap; }

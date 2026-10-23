@@ -15,6 +15,7 @@ from .config import Config
 from .detectors import build_detectors, IOCStore
 from .models import Event, SEVERITY_LABELS
 from .parsers import iter_events, detect_parser, is_probably_log
+from .respond import attach_playbooks
 from .session import SessionTracker
 
 
@@ -154,5 +155,10 @@ def run_analysis(paths: list[str], config: Config | None = None,
         "alert_count": len(result.alerts),
         "ioc_count": len(ioc_store.items) if ioc_store else 0,
     }
+    # 处置剧本：按告警实体与证据来源生成四阶段响应命令（只产出文本，不执行）
+    try:
+        attach_playbooks(result)
+    except Exception as exc:
+        result.errors.append(f"处置剧本生成异常: {type(exc).__name__}: {exc}")
     result.finished = time.time()
     return result

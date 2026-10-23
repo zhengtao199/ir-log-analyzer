@@ -16,6 +16,9 @@ from irlog.engine import run_analysis
 from irlog.evidence import EvidenceSet, sha256_file, chain_of_custody
 from irlog.parsers import detect_parser, iter_events
 from irlog.report_html import build_html
+from irlog.report_playbook import build_playbook_html
+from irlog.respond import (PLAYBOOKS, PLACEHOLDERS, STAGES, build_playbook,
+                           extract_vars, playbook_markdown)
 from irlog.server import parse_multipart
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
@@ -1196,6 +1199,118 @@ class TestHttpContent(unittest.TestCase):
     def test_rule_can_be_disabled(self):
         r = self._run(["traffic_http.pcap"], rules="brute-force")
         self.assertEqual([a for a in r.alerts if a.rule_id == "http-content"], [])
+
+
+class TestRespondKB(unittest.TestCase):
+    """处置知识库自检：覆盖度、阶段齐整、占位符合法。"""
+
+    def test_every_rule_covered(self):
+        from irlog.detectors import ALL_DETECTORS
+        ids = {d.rule_id for d in ALL_DETECTORS}
+        self.assertEqual(ids - set(PLAYBOOKS), set(),
+                         f"缺少剧本的规则: {ids - set(PLAYBOOKS)}")
+
+    def test_every_platform_has_all_stages(self):
+        for rule, plats in PLAYBOOKS.items():
+            for plat, stages in plats.items():
+                for key, _l, _h in STAGES:
+                    self.assertTrue(stages.get(key),
+                                    f"{rule}/{plat} 缺阶段 {key}")
+                    self.assertTrue(all(c.get("cmd") for c in stages[key]),
+                                    f"{rule}/{plat}/{key} 有空命令")
+
+    def test_no_placeholder_in_note(self):
+        """note 不参与回填，里面不能出现占位符（否则用户看到 {ip} 原文）。"""
+        for rule, plats in PLAYBOOKS.items():
+            for plat, stages in plats.items():
+                for key, cmds in stages.items():
+                    for c in cmds:
+                        for ph in PLACEHOLDERS:
+                            self.assertNotIn("{%s}" % ph, c.get("note", ""),
+                                             f"{rule}/{plat}/{key} note 含占位符")
+
+
+class TestPlaybookRender(unittest.TestCase):
+    """剧本渲染：实体回填、阶段顺序、报告与手册产出。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.result = run_analysis([fx("winsec_security.xml"), fx("traffic_stream.pcap")])
+
+    def test_alerts_have_stages(self):
+        self.assertTrue(self.result.alerts)
+        for a in self.result.alerts:
+            pb = a.playbook
+            self.assertTrue(pb.get("stages"), f"{a.rule_id} 无阶段")
+            keys = [s["key"] for s in pb["stages"]]
+            self.assertEqual(keys, [k for k, _l, _h in STAGES if k in keys])
+
+    def test_no_leftover_known_placeholder(self):
+        for a in self.result.alerts:
+            for st in a.playbook.get("stages", []):
+                for c in st["cmds"]:
+                    for ph in PLACEHOLDERS:
+                        self.assertNotIn("{%s}" % ph, c["cmd"],
+                                         f"{a.rule_id} 未回填 {ph}: {c['cmd'][:60]}")
+
+    def test_ip_filled_when_entity_present(self):
+        for a in self.result.alerts:
+            ip = a.entities.get("src_ip") or a.entities.get("dst_ip")
+            if not ip:
+                continue
+            joined = " ".join(c["cmd"] for s in a.playbook.get("stages", [])
+                              for c in s["cmds"])
+            self.assertIn(ip, joined, f"{a.rule_id} 有 IP 实体但未回填")
+
+    def test_host_not_filled_with_filename(self):
+        """主机名不得被填成证据文件名（brute-force 曾把 source 当 host）。"""
+        for a in self.result.alerts:
+            for s in a.playbook.get("stages", []):
+                for c in s["cmds"]:
+                    self.assertNotRegex(c["cmd"], r"fixtures?[\\/][^\s]*\.(xml|pcap|log|jsonl)")
+
+    def test_vars_from_evidence(self):
+        """实体缺失时，应从 reasons/证据原文回补 IP 与主机名。"""
+        r = run_analysis([fx("sysmon_obfuscated.xml")])
+        cand = [x for x in r.alerts if x.rule_id == "command-obfuscation"]
+        self.assertTrue(cand, "夹具应触发命令混淆告警")
+        v = extract_vars(cand[0])
+        self.assertTrue(v.get("ip"), "应从 reasons 里的 URL 提取到 IP")
+        self.assertTrue(v.get("host"), "应取到主机名")
+
+    def test_path_like_rejected(self):
+        from irlog.respond import _is_path_like
+        self.assertTrue(_is_path_like("tests/fixtures/x.xml"))
+        self.assertTrue(_is_path_like(None))
+        self.assertFalse(_is_path_like("WKST05.corp.local"))
+
+    def test_playbook_markdown(self):
+        md = playbook_markdown(self.result)
+        for _k, label, _h in STAGES:
+            self.assertIn(label, md)
+        self.assertIn("应急响应处置手册", md)
+        self.assertIn("```bash", md)
+
+    def test_playbook_html(self):
+        custody = {"case_id": "TEST-1", "operator": "tester"}
+        html = build_playbook_html(self.result, custody)
+        self.assertIn("应急响应处置手册", html)
+        self.assertIn("copyCmd", html)
+        self.assertIn("紧急", html)
+        # 所有命令都做了 HTML 转义（不能出现未转义的 < 开头标签残留）
+        self.assertNotIn("<script>alert", html)
+
+
+class TestMainReportWithPlaybook(unittest.TestCase):
+    """主报告也要内嵌剧本。"""
+
+    def test_html_report_contains_playbook(self):
+        r = run_analysis([fx("traffic_stream.pcap")])
+        custody = {"case_id": "TEST-2", "operator": "tester",
+                   "evidence": {"items": []}, "evidence_integrity": ""}
+        html = build_html(r, custody)
+        self.assertIn("应急响应处置剧本", html)
+        self.assertIn("copyCmd", html)
 
 
 if __name__ == "__main__":

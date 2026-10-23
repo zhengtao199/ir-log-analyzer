@@ -329,6 +329,47 @@ function filteredAlerts() {
   });
 }
 
+function copyText(txt, btn) {
+  const done = () => {
+    if (!btn) return;
+    const o = btn.innerText; btn.innerText = '已复制';
+    setTimeout(() => { btn.innerText = o; }, 1500);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(done, () => fbCopy(txt, done));
+  } else { fbCopy(txt, done); }
+}
+function fbCopy(txt, cb) {
+  const ta = document.createElement('textarea');
+  ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); cb && cb(); } catch (e) {}
+  document.body.removeChild(ta);
+}
+
+function playbookHtml(a) {
+  const pb = a.playbook;
+  if (!pb || !pb.stages || !pb.stages.length) return '';
+  const plats = (pb.platform_labels || []).join(' / ');
+  let miss = '';
+  if (pb.missing_vars && pb.missing_vars.length) {
+    miss = `<div class="pb-miss">⚠ 命令中的 ${pb.missing_vars.map((m) => '&lt;' + esc(m) + '&gt;').join('、')} 未能从日志自动取到，请按现场情况替换后再执行。</div>`;
+  }
+  const stages = pb.stages.map((st, si) => {
+    const cmds = st.cmds.map((c, ci) => {
+      const id = `cmd-${a.rule_id}-${si}-${ci}`;
+      const pf = c.platform ? `<span class="pf">${esc(c.platform)}</span>` : '';
+      const note = c.note ? `<div class="note">${esc(c.note)}</div>` : '';
+      return `<div class="cmd">${pf}<div style="flex:1"><pre id="${id}">${esc(c.cmd)}</pre>${note}</div>` +
+             `<button onclick="copyText(document.getElementById('${id}').innerText, this)">复制</button></div>`;
+    }).join('');
+    return `<div class="pb-stage"><div class="st-t">${esc(st.label)}</div>` +
+           `<div class="st-h">${esc(st.hint || '')}</div>${cmds}</div>`;
+  }).join('');
+  return `<div class="pb"><div class="pb-h">🚨 应急响应处置剧本` +
+         (plats ? `<span class="plats">适用平台: ${esc(plats)}</span>` : '') + `</div>${miss}${stages}</div>`;
+}
+
 function alertCard(a) {
   const ent = Object.entries(a.entities || {})
     .map(([k, v]) => `<b>${esc(k)}</b>: ${esc(Array.isArray(v) ? v.join(', ') : v)}`)
@@ -346,6 +387,7 @@ function alertCard(a) {
       <div class="kv">${ent || '<span class="hint">无实体信息</span>'}</div>
       <span class="tag-mitre">ATT&CK: ${esc(a.mitre)}</span>
       <div class="rec"><b>处置建议：</b>${esc(a.recommendation)}</div>
+      ${playbookHtml(a)}
       <div style="margin-top:8px"><b>证据样本</b>（原始日志只读未改）：</div>
       ${evs || '<div class="hint">（无采样证据）</div>'}
     </div>
@@ -358,6 +400,8 @@ function renderAlerts() {
   const total = (state.current?.alerts || []).length;
   pill.style.display = total ? 'inline-block' : 'none';
   pill.textContent = total;
+  const btnPb = $('#btnPlaybook');
+  if (btnPb) btnPb.style.display = (state.current?.report_playbook) ? '' : 'none';
   if (!state.current) {
     box.innerHTML = '<div class="empty"><span class="big">🚨</span>尚未运行分析。前往「分析中心」开始，或在「报告中心」载入历史结果。</div>';
     $('#alertCountLabel').textContent = '';
@@ -378,8 +422,14 @@ function renderAlerts() {
     : '<div class="empty"><span class="big">✅</span>没有符合筛选条件的告警</div>';
 }
 
-function exportFiltered() {
-  const list = filteredAlerts();
+function downloadPlaybook() {
+  const runId = state.current?.run_id;
+  if (!runId) { toast('没有可下载的处置手册', 'err'); return; }
+  window.open(`/api/report/${encodeURIComponent(runId)}?format=playbook`, '_blank');
+  toast('处置手册已在新标签页打开，可直接打印或转发', 'ok');
+}
+
+function exportFiltered() {  const list = filteredAlerts();
   if (!list.length) { toast('没有可导出的告警', 'err'); return; }
   const blob = new Blob([JSON.stringify({ exported_at: new Date().toISOString(), alerts: list }, null, 2)],
     { type: 'application/json' });

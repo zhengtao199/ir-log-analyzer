@@ -198,6 +198,16 @@ def main():
     check("阈值覆盖生效（404 阈值=1 产生告警）", result["stats"]["alert_count"] > 0)
     check("结果含统计/时间线/证据链字段",
           result["stats"]["total_events"] > 0 and "hour_histogram" in result["timeline"])
+    # 处置剧本：每条告警都必须带四阶段命令
+    pbs = [a.get("playbook") or {} for a in result["alerts"]]
+    check("每条告警都带处置剧本", pbs and all(p.get("stages") for p in pbs))
+    stages = [s["key"] for p in pbs for s in p.get("stages", [])]
+    check("剧本含核查/遏制/取证/根除四阶段",
+          all(k in stages for k in ("verify", "contain", "preserve", "eradicate")),
+          str(sorted(set(stages))))
+    check("剧本命令非空", all(c.get("cmd") for p in pbs for s in p.get("stages", [])
+                              for c in s["cmds"]))
+    check("服务端已生成处置手册", bool(result.get("report_playbook")))
 
     print("== 7. IOC 管理 ==")
     st, r, _ = post_json("/api/ioc", {"text": "203.0.113.99\nevil.example.com\n# 注释"})
@@ -222,6 +232,11 @@ def main():
     st, body, ct = req("GET", f"/api/report/{run_id}?format=html", raw=True)
     h = body.decode("utf-8")
     check("HTML 报告可下载且自包含", st == 200 and "证据链" in h and "src=\"http" not in h)
+    st, body, ct = req("GET", f"/api/report/{run_id}?format=playbook", raw=True)
+    pb_html = body.decode("utf-8", "replace")
+    check("处置手册可下载", st == 200 and "应急响应处置手册" in pb_html, f"st={st}")
+    check("手册含四阶段与复制按钮", all(k in pb_html for k in
+          ("阶段①", "阶段②", "阶段③", "阶段④", "copyCmd")))
     st, _, _ = req("GET", f"/api/report/{run_id}?format=xml", raw=True)
     check("非法 format 回落 html", st == 200)
 
